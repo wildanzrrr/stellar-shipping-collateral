@@ -5,7 +5,7 @@ mod errors;
 mod events;
 mod interface;
 mod storage;
-mod types;
+pub mod types;
 
 use crate::errors::Error;
 use crate::events::{Initialized, MaxBalanceSet, TokenBound, TokenUnbound};

@@ -9,7 +9,11 @@ crate-type = ["lib", "cdylib"]
 doctest = false
 
 [dependencies]
+compliance = { path = "../compliance" }
+identity-verifier = { path = "../identity-verifier" }
 soroban-sdk = { workspace = true }
 
 [dev-dependencies]
+compliance = { path = "../compliance" }
+identity-verifier = { path = "../identity-verifier" }
 soroban-sdk = { workspace = true, features = ["testutils"] }
