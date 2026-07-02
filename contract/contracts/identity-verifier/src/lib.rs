@@ -1,22 +1,43 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, vec, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Env};
+
+mod errors;
+mod events;
+mod interface;
+mod storage;
+
+use crate::errors::Error;
+use crate::events::{Initialized, VerificationSet};
+use crate::interface::IdentityVerifierInteface;
 
 #[contract]
 pub struct IdentityVerifier;
 
-// This is a sample contract. Replace this placeholder with your own contract logic.
-// A corresponding test example is available in `test.rs`.
-//
-// For comprehensive examples, visit <https://github.com/stellar/soroban-examples>.
-// The repository includes use cases for the Stellar ecosystem, such as data storage on
-// the blockchain, token swaps, liquidity pools, and more.
-//
-// Refer to the official documentation:
-// <https://developers.stellar.org/docs/build/smart-contracts/overview>.
 #[contractimpl]
-impl IdentityVerifier {
-    pub fn hello(env: Env, to: String) -> Vec<String> {
-        vec![&env, String::from_str(&env, "Hello"), to]
+impl IdentityVerifierInteface for IdentityVerifier {
+    fn __constructor(env: Env, admin: Address) {
+        storage::set_admin(&env, &admin);
+
+        Initialized { admin }.publish(&env);
+    }
+
+    fn set_verified(env: Env, user: Address, verified: bool, operator: Address) {
+        operator.require_auth();
+        storage::require_admin(&env, &operator);
+
+        storage::set_verified(&env, &user, verified);
+
+        VerificationSet { user, verified }.publish(&env);
+    }
+
+    fn is_verified(env: Env, user: Address) -> bool {
+        storage::is_verified(&env, &user)
+    }
+
+    fn verify_identity(env: Env, user: Address) {
+        if !storage::is_verified(&env, &user) {
+            panic_with_error!(&env, Error::IdentityNotVerified);
+        }
     }
 }
 
