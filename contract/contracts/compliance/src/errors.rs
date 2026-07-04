@@ -4,10 +4,9 @@ use soroban_sdk::contracterror;
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum Error {
-    NotInitialized = 1,
-    Unauthorized = 2,
-    TokenNotBound = 3,
-    InvalidAmount = 4,
-    InvalidMaxBalance = 5,
-    MaxBalanceExceeded = 6,
+    Unauthorized = 1,
+    TokenNotBound = 2,
+    InvalidAmount = 3,
+    InvalidMaxBalance = 4,
+    MaxBalanceExceeded = 5,
 }

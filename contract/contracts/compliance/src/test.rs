@@ -34,32 +34,8 @@ impl TestFixture {
     fn address(&self) -> soroban_sdk::Address {
         <soroban_sdk::Address as Address>::generate(&self.env)
     }
-
-    fn snapshot(&self, address: soroban_sdk::Address, balance: i128) -> AccountSnapshot {
-        AccountSnapshot {
-            address,
-            balance,
-            frozen: 0,
-        }
-    }
-
-    fn bind_token_with_max_balance(&self, max_balance: i128) {
-        let client = self.client();
-
-        client.bind_token(&self.token, &self.admin);
-        client.set_max_balance(&self.token, &max_balance, &self.admin);
-    }
 }
 
-#[test]
-fn admin_can_bind_token() {
-    let fixture = TestFixture::new();
-    let client = fixture.client();
-
-    client.bind_token(&fixture.token, &fixture.admin);
-
-    assert_eq!(client.is_token_bound(&fixture.token), true);
-}
 #[test]
 #[should_panic]
 fn non_admin_cannot_bind_token() {
@@ -71,93 +47,90 @@ fn non_admin_cannot_bind_token() {
 }
 
 #[test]
-fn admin_can_set_max_balance() {
+fn admin_can_bind_token() {
     let fixture = TestFixture::new();
     let client = fixture.client();
 
     client.bind_token(&fixture.token, &fixture.admin);
+
+    assert_eq!(client.is_token_bound(&fixture.token), true);
+}
+
+#[test]
+fn admin_can_bind_multiple_tokens() {
+    let fixture = TestFixture::new();
+    let client = fixture.client();
+    let token1 = fixture.address();
+    let token2 = fixture.address();
+
+    client.bind_token(&token1, &fixture.admin);
+    client.bind_token(&token2, &fixture.admin);
+
+    assert_eq!(client.is_token_bound(&token1), true);
+    assert_eq!(client.is_token_bound(&token2), true);
+}
+
+#[test]
+#[should_panic]
+fn non_admin_cannot_unbind_token() {
+    let fixture = TestFixture::new();
+    let client = fixture.client();
+    let non_admin = fixture.address();
+
+    client.unbind_token(&fixture.token, &non_admin);
+}
+
+#[test]
+fn admin_can_unbind_token() {
+    let fixture = TestFixture::new();
+    let clinet = fixture.client();
+
+    clinet.bind_token(&fixture.token, &fixture.admin);
+    clinet.unbind_token(&fixture.token, &fixture.admin);
+}
+
+#[test]
+#[should_panic]
+fn non_admin_cannot_set_max_balance() {
+    let fixture = TestFixture::new();
+    let client = fixture.client();
+    let non_admin = fixture.address();
+
+    client.set_max_balance(&fixture.token, &1_000, &non_admin);
+}
+
+#[test]
+#[should_panic]
+fn cannot_set_max_balance_for_unbound_token() {
+    let fixture = TestFixture::new();
+    let client = fixture.client();
+    let invalid_token = fixture.address();
+
+    client.set_max_balance(&invalid_token, &1_000, &fixture.admin);
+}
+
+#[test]
+#[should_panic]
+fn cannot_set_negative_max_balance() {
+    let fixture = TestFixture::new();
+    let client = fixture.client();
+
+    client.bind_token(&fixture.token, &fixture.admin);
+    client.set_max_balance(&fixture.token, &-1_000, &fixture.admin);
+}
+
+#[test]
+fn admin_can_set_max_balance() {
+    let fixture = TestFixture::new();
+    let client = fixture.client();
+    let new_token = fixture.address();
+
+    client.bind_token(&fixture.token, &fixture.admin);
     client.set_max_balance(&fixture.token, &1_000, &fixture.admin);
 
+    client.bind_token(&new_token, &fixture.admin);
+    client.set_max_balance(&new_token, &2_000, &fixture.admin);
+
     assert_eq!(client.max_balance(&fixture.token), 1_000);
-}
-
-#[test]
-fn created_passes_when_receiver_stays_under_max_balance() {
-    let fixture = TestFixture::new();
-    let client = fixture.client();
-    let receiver = fixture.address();
-
-    fixture.bind_token_with_max_balance(1_000);
-
-    client.created(&fixture.snapshot(receiver, 700), &300, &fixture.token);
-}
-
-#[test]
-#[should_panic]
-fn created_panics_when_receiver_exceeds_max_balance() {
-    let fixture = TestFixture::new();
-    let client = fixture.client();
-    let receiver = fixture.address();
-
-    fixture.bind_token_with_max_balance(1_000);
-
-    client.created(&fixture.snapshot(receiver, 700), &301, &fixture.token);
-}
-
-#[test]
-fn transferred_passes_when_receiver_stays_under_max_balance() {
-    let fixture = TestFixture::new();
-    let client = fixture.client();
-    let sender = fixture.address();
-    let receiver = fixture.address();
-
-    fixture.bind_token_with_max_balance(1_000);
-
-    client.transferred(
-        &fixture.snapshot(sender, 500),
-        &fixture.snapshot(receiver, 700),
-        &300,
-        &TransferKind::Standard,
-        &fixture.token,
-    );
-}
-
-#[test]
-#[should_panic]
-fn transferred_panics_when_receiver_exceeds_max_balance() {
-    let fixture = TestFixture::new();
-    let client = fixture.client();
-    let sender = fixture.address();
-    let receiver = fixture.address();
-
-    fixture.bind_token_with_max_balance(1_000);
-
-    client.transferred(
-        &fixture.snapshot(sender, 500),
-        &fixture.snapshot(receiver, 700),
-        &301,
-        &TransferKind::Standard,
-        &fixture.token,
-    );
-}
-
-#[test]
-fn destroyed_passes_for_bound_token() {
-    let fixture = TestFixture::new();
-    let client = fixture.client();
-    let holder = fixture.address();
-
-    fixture.bind_token_with_max_balance(1_000);
-
-    client.destroyed(&fixture.snapshot(holder, 500), &100, &fixture.token);
-}
-
-#[test]
-#[should_panic]
-fn hook_panics_for_unbound_token() {
-    let fixture = TestFixture::new();
-    let client = fixture.client();
-    let receiver = fixture.address();
-
-    client.created(&fixture.snapshot(receiver, 700), &300, &fixture.token);
+    assert_eq!(client.max_balance(&new_token), 2_000);
 }

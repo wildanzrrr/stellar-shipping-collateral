@@ -15,10 +15,7 @@ pub fn set_admin(env: &Env, admin: &Address) {
 }
 
 pub fn admin(env: &Env) -> Address {
-    env.storage()
-        .instance()
-        .get(&DataKey::Admin)
-        .unwrap_or_else(|| panic_with_error!(env, Error::NotInitialized))
+    env.storage().instance().get(&DataKey::Admin).unwrap()
 }
 
 pub fn require_admin(env: &Env, operator: &Address) {

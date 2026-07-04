@@ -10,6 +10,7 @@ pub trait ComplianceInterface {
     fn set_max_balance(env: Env, token: Address, max_balance: i128, operator: Address);
     fn is_token_bound(env: Env, token: Address) -> bool;
     fn max_balance(env: Env, token: Address) -> i128;
+
     fn created(env: Env, to: AccountSnapshot, amount: i128, token: Address);
     fn transferred(
         env: Env,
