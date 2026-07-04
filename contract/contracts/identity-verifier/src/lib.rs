@@ -5,11 +5,12 @@ mod errors;
 mod events;
 mod interface;
 mod storage;
+mod types;
 
 use crate::errors::Error;
 use crate::events::{Initialized, VerificationSet};
 use crate::interface::IdentityVerifierInteface;
-use crate::storage::{Identity, IdentityRole};
+use crate::types::{Identity, IdentityRole};
 
 #[contract]
 pub struct IdentityVerifier;

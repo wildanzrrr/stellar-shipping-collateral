@@ -45,7 +45,7 @@ impl ComplianceInterface for Compliance {
         operator.require_auth();
         storage::require_admin(&env, &operator);
         require_bound_token(&env, &token);
-        require_positive(&env, max_balance, Error::InvalidMaxBalance);
+        require_positive(&env, max_balance);
 
         storage::set_max_balance(&env, &token, max_balance);
 
@@ -62,7 +62,7 @@ impl ComplianceInterface for Compliance {
 
     fn created(env: Env, to: AccountSnapshot, amount: i128, token: Address) {
         require_bound_token(&env, &token);
-        require_positive(&env, amount, Error::InvalidAmount);
+        require_positive(&env, amount);
         require_max_balance(&env, &token, to.balance + amount);
     }
 
@@ -75,13 +75,13 @@ impl ComplianceInterface for Compliance {
         token: Address,
     ) {
         require_bound_token(&env, &token);
-        require_positive(&env, amount, Error::InvalidAmount);
+        require_positive(&env, amount);
         require_max_balance(&env, &token, to.balance + amount);
     }
 
     fn destroyed(env: Env, _from: AccountSnapshot, amount: i128, token: Address) {
         require_bound_token(&env, &token);
-        require_positive(&env, amount, Error::InvalidAmount);
+        require_positive(&env, amount);
     }
 }
 
@@ -91,9 +91,9 @@ fn require_bound_token(env: &Env, token: &Address) {
     }
 }
 
-fn require_positive(env: &Env, amount: i128, error: Error) {
+fn require_positive(env: &Env, amount: i128) {
     if amount <= 0 {
-        panic_with_error!(env, error);
+        panic_with_error!(env, Error::InvalidAmount);
     }
 }
 

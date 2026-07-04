@@ -20,10 +20,7 @@ pub fn set_admin(env: &Env, admin: &Address) {
 }
 
 pub fn admin(env: &Env) -> Address {
-    env.storage()
-        .instance()
-        .get(&DataKey::Admin)
-        .unwrap_or_else(|| panic_with_error!(env, Error::NotInitialized))
+    env.storage().instance().get(&DataKey::Admin).unwrap()
 }
 
 pub fn require_admin(env: &Env, operator: &Address) {
@@ -42,7 +39,7 @@ pub fn identity_verifier(env: &Env) -> Address {
     env.storage()
         .instance()
         .get(&DataKey::IdentityVerifier)
-        .unwrap_or_else(|| panic_with_error!(env, Error::NotInitialized))
+        .unwrap()
 }
 
 pub fn set_compliance(env: &Env, compliance: &Address) {
@@ -52,10 +49,7 @@ pub fn set_compliance(env: &Env, compliance: &Address) {
 }
 
 pub fn compliance(env: &Env) -> Address {
-    env.storage()
-        .instance()
-        .get(&DataKey::Compliance)
-        .unwrap_or_else(|| panic_with_error!(env, Error::NotInitialized))
+    env.storage().instance().get(&DataKey::Compliance).unwrap()
 }
 
 pub fn set_name(env: &Env, name: &String) {
@@ -63,10 +57,7 @@ pub fn set_name(env: &Env, name: &String) {
 }
 
 pub fn name(env: &Env) -> String {
-    env.storage()
-        .instance()
-        .get(&DataKey::Name)
-        .unwrap_or_else(|| panic_with_error!(env, Error::NotInitialized))
+    env.storage().instance().get(&DataKey::Name).unwrap()
 }
 
 pub fn set_symbol(env: &Env, symbol: &String) {
@@ -74,10 +65,7 @@ pub fn set_symbol(env: &Env, symbol: &String) {
 }
 
 pub fn symbol(env: &Env) -> String {
-    env.storage()
-        .instance()
-        .get(&DataKey::Symbol)
-        .unwrap_or_else(|| panic_with_error!(env, Error::NotInitialized))
+    env.storage().instance().get(&DataKey::Symbol).unwrap()
 }
 
 pub fn set_decimals(env: &Env, decimals: u32) {
@@ -85,10 +73,7 @@ pub fn set_decimals(env: &Env, decimals: u32) {
 }
 
 pub fn decimals(env: &Env) -> u32 {
-    env.storage()
-        .instance()
-        .get(&DataKey::Decimals)
-        .unwrap_or_else(|| panic_with_error!(env, Error::NotInitialized))
+    env.storage().instance().get(&DataKey::Decimals).unwrap()
 }
 
 pub fn balance(env: &Env, user: &Address) -> i128 {

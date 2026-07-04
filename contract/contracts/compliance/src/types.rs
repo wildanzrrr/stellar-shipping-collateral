@@ -13,3 +13,11 @@ pub struct AccountSnapshot {
 pub enum TransferKind {
     Standard,
 }
+
+#[derive(Clone)]
+#[contracttype]
+pub enum DataKey {
+    Admin,
+    BoundToken(Address),
+    MaxBalance(Address),
+}

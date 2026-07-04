@@ -1,6 +1,6 @@
 use soroban_sdk::{contracttrait, Address, Env, String};
 
-use crate::storage::{Identity, IdentityRole};
+use crate::types::{Identity, IdentityRole};
 
 #[contracttrait]
 pub trait IdentityVerifierInteface {

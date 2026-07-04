@@ -1,7 +1,10 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::Address, Env};
+use soroban_sdk::{
+    testutils::{Address, Events},
+    Env, Event,
+};
 
 struct TestFixture {
     env: Env,
@@ -37,100 +40,152 @@ impl TestFixture {
 }
 
 #[test]
-#[should_panic]
 fn non_admin_cannot_bind_token() {
     let fixture = TestFixture::new();
     let client = fixture.client();
     let non_admin = fixture.address();
 
-    client.bind_token(&fixture.token, &non_admin);
+    assert_eq!(
+        client.try_bind_token(&fixture.token, &non_admin),
+        Err(Ok(Error::Unauthorized.into()))
+    );
 }
 
 #[test]
 fn admin_can_bind_token() {
     let fixture = TestFixture::new();
     let client = fixture.client();
+    let new_token = fixture.address();
 
-    client.bind_token(&fixture.token, &fixture.admin);
+    client.bind_token(&new_token, &fixture.admin);
+    fixture.env.as_contract(&fixture.contract_id, || {
+        Compliance::bind_token(
+            fixture.env.clone(),
+            new_token.clone(),
+            fixture.admin.clone(),
+        );
+    });
 
-    assert_eq!(client.is_token_bound(&fixture.token), true);
+    let contract_events = fixture
+        .env
+        .events()
+        .all()
+        .filter_by_contract(&fixture.contract_id);
+    let expected_event = TokenBound {
+        token: new_token.clone(),
+    }
+    .to_xdr(&fixture.env, &fixture.contract_id);
+
+    assert_eq!(contract_events, [expected_event]);
+    assert!(client.is_token_bound(&new_token));
 }
 
 #[test]
-fn admin_can_bind_multiple_tokens() {
-    let fixture = TestFixture::new();
-    let client = fixture.client();
-    let token1 = fixture.address();
-    let token2 = fixture.address();
-
-    client.bind_token(&token1, &fixture.admin);
-    client.bind_token(&token2, &fixture.admin);
-
-    assert_eq!(client.is_token_bound(&token1), true);
-    assert_eq!(client.is_token_bound(&token2), true);
-}
-
-#[test]
-#[should_panic]
 fn non_admin_cannot_unbind_token() {
     let fixture = TestFixture::new();
     let client = fixture.client();
     let non_admin = fixture.address();
 
-    client.unbind_token(&fixture.token, &non_admin);
+    assert_eq!(
+        client.try_unbind_token(&fixture.token, &non_admin),
+        Err(Ok(Error::Unauthorized.into()))
+    );
 }
 
 #[test]
 fn admin_can_unbind_token() {
     let fixture = TestFixture::new();
-    let clinet = fixture.client();
+    let client = fixture.client();
 
-    clinet.bind_token(&fixture.token, &fixture.admin);
-    clinet.unbind_token(&fixture.token, &fixture.admin);
+    client.bind_token(&fixture.token, &fixture.admin);
+    client.unbind_token(&fixture.token, &fixture.admin);
+
+    fixture.env.as_contract(&fixture.contract_id, || {
+        Compliance::unbind_token(
+            fixture.env.clone(),
+            fixture.token.clone(),
+            fixture.admin.clone(),
+        );
+    });
+
+    let contract_events = fixture
+        .env
+        .events()
+        .all()
+        .filter_by_contract(&fixture.contract_id);
+    let expected_event = TokenUnbound {
+        token: fixture.token.clone(),
+    }
+    .to_xdr(&fixture.env, &fixture.contract_id);
+
+    assert_eq!(contract_events, [expected_event]);
+    assert!(!client.is_token_bound(&fixture.token));
 }
 
 #[test]
-#[should_panic]
 fn non_admin_cannot_set_max_balance() {
     let fixture = TestFixture::new();
     let client = fixture.client();
     let non_admin = fixture.address();
 
-    client.set_max_balance(&fixture.token, &1_000, &non_admin);
+    assert_eq!(
+        client.try_set_max_balance(&fixture.token, &1_000, &non_admin),
+        Err(Ok(Error::Unauthorized.into()))
+    );
 }
 
 #[test]
-#[should_panic]
 fn cannot_set_max_balance_for_unbound_token() {
     let fixture = TestFixture::new();
     let client = fixture.client();
     let invalid_token = fixture.address();
 
-    client.set_max_balance(&invalid_token, &1_000, &fixture.admin);
+    assert_eq!(
+        client.try_set_max_balance(&invalid_token, &1_000, &fixture.admin),
+        Err(Ok(Error::TokenNotBound.into()))
+    );
 }
 
 #[test]
-#[should_panic]
 fn cannot_set_negative_max_balance() {
     let fixture = TestFixture::new();
     let client = fixture.client();
 
     client.bind_token(&fixture.token, &fixture.admin);
-    client.set_max_balance(&fixture.token, &-1_000, &fixture.admin);
+    assert_eq!(
+        client.try_set_max_balance(&fixture.token, &-1_000, &fixture.admin),
+        Err(Ok(Error::InvalidAmount.into()))
+    );
 }
 
 #[test]
 fn admin_can_set_max_balance() {
     let fixture = TestFixture::new();
     let client = fixture.client();
-    let new_token = fixture.address();
 
     client.bind_token(&fixture.token, &fixture.admin);
     client.set_max_balance(&fixture.token, &1_000, &fixture.admin);
 
-    client.bind_token(&new_token, &fixture.admin);
-    client.set_max_balance(&new_token, &2_000, &fixture.admin);
+    fixture.env.as_contract(&fixture.contract_id, || {
+        Compliance::set_max_balance(
+            fixture.env.clone(),
+            fixture.token.clone(),
+            1_000,
+            fixture.admin.clone(),
+        );
+    });
 
+    let contract_events = fixture
+        .env
+        .events()
+        .all()
+        .filter_by_contract(&fixture.contract_id);
+    let expected_event = MaxBalanceSet {
+        token: fixture.token.clone(),
+        max_balance: 1_000,
+    }
+    .to_xdr(&fixture.env, &fixture.contract_id);
+
+    assert_eq!(contract_events, [expected_event]);
     assert_eq!(client.max_balance(&fixture.token), 1_000);
-    assert_eq!(client.max_balance(&new_token), 2_000);
 }

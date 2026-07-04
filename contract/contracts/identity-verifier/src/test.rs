@@ -3,7 +3,7 @@
 extern crate std;
 
 use super::*;
-use crate::storage::IdentityRole;
+use crate::types::IdentityRole;
 use soroban_sdk::{testutils::Address, Env};
 
 struct TestFixture {
@@ -37,17 +37,18 @@ impl TestFixture {
 }
 
 #[test]
-#[should_panic]
 fn verify_identity_panics_when_user_not_found() {
     let fixture = TestFixture::new();
     let client = fixture.client();
     let user = fixture.address();
 
-    client.verify_identity(&user);
+    assert_eq!(
+        client.try_verify_identity(&user),
+        Err(Ok(Error::IdentityNotFound.into()))
+    );
 }
 
 #[test]
-#[should_panic]
 fn verify_identity_panics_when_user_exists_but_unverified() {
     let fixture = TestFixture::new();
     let client = fixture.client();
@@ -62,7 +63,10 @@ fn verify_identity_panics_when_user_exists_but_unverified() {
         &fixture.admin,
     );
 
-    client.verify_identity(&user);
+    assert_eq!(
+        client.try_verify_identity(&user),
+        Err(Ok(Error::IdentityNotVerified.into()))
+    )
 }
 
 #[test]
@@ -83,7 +87,6 @@ fn verify_identity_passes_for_verified_user() {
 }
 
 #[test]
-#[should_panic]
 fn set_identity_panics_when_not_called_by_admin() {
     let fixture = TestFixture::new();
     let client = fixture.client();
@@ -91,7 +94,10 @@ fn set_identity_panics_when_not_called_by_admin() {
     let country_code = String::from_str(&fixture.env, "IDN");
     let non_admin = fixture.address();
 
-    client.set_identity(&user, &true, &country_code, &IdentityRole::KYC, &non_admin);
+    assert_eq!(
+        client.try_set_identity(&user, &true, &country_code, &IdentityRole::KYC, &non_admin),
+        Err(Ok(Error::Unauthorized.into()))
+    );
 }
 
 #[test]

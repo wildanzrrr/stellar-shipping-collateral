@@ -1,14 +1,7 @@
-use soroban_sdk::{contracttype, panic_with_error, Address, Env};
+use soroban_sdk::{panic_with_error, Address, Env};
 
 use crate::errors::Error;
-
-#[derive(Clone)]
-#[contracttype]
-pub enum DataKey {
-    Admin,
-    BoundToken(Address),
-    MaxBalance(Address),
-}
+use crate::types::DataKey;
 
 pub fn set_admin(env: &Env, admin: &Address) {
     env.storage().instance().set(&DataKey::Admin, admin);
