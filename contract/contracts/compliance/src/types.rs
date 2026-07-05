@@ -17,6 +17,7 @@ pub enum TransferKind {
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
+    Initialized,
     Admin,
     BoundToken(Address),
     MaxBalance(Address),

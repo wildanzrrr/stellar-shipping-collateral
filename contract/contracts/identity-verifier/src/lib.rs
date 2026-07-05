@@ -17,13 +17,24 @@ pub struct IdentityVerifier;
 
 #[contractimpl]
 impl IdentityVerifierInteface for IdentityVerifier {
-    fn __constructor(env: Env, admin: Address) {
+    fn initialize(env: Env, admin: Address) {
+        if storage::is_initialized(&env) {
+            panic_with_error!(env, Error::AlreadyInitialized);
+        }
+
+        admin.require_auth();
+
+        storage::set_initialized(&env);
         storage::set_admin(&env, &admin);
 
         Initialized { admin }.publish(&env);
     }
 
     fn verify_identity(env: Env, user: Address) {
+        if !storage::is_initialized(&env) {
+            panic_with_error!(env, Error::Unauthorized);
+        }
+
         let identity = storage::get_user_identity(&env, &user);
         if identity.is_none() {
             panic_with_error!(env, Error::IdentityNotFound);

@@ -3,6 +3,17 @@ use soroban_sdk::{panic_with_error, Address, Env};
 use crate::errors::Error;
 use crate::types::DataKey;
 
+pub fn set_initialized(env: &Env) {
+    env.storage().instance().set(&DataKey::Initialized, &true);
+}
+
+pub fn is_initialized(env: &Env) -> bool {
+    env.storage()
+        .instance()
+        .get(&DataKey::Initialized)
+        .unwrap_or(false)
+}
+
 pub fn set_admin(env: &Env, admin: &Address) {
     env.storage().instance().set(&DataKey::Admin, admin);
 }

@@ -4,7 +4,7 @@ use crate::types::{AccountSnapshot, TransferKind};
 
 #[contracttrait]
 pub trait ComplianceInterface {
-    fn __constructor(env: Env, admin: Address);
+    fn initialize(env: Env, admin: Address);
     fn bind_token(env: Env, token: Address, operator: Address);
     fn unbind_token(env: Env, token: Address, operator: Address);
     fn set_max_balance(env: Env, token: Address, max_balance: i128, operator: Address);

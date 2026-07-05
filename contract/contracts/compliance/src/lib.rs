@@ -17,7 +17,14 @@ pub struct Compliance;
 
 #[contractimpl]
 impl ComplianceInterface for Compliance {
-    fn __constructor(env: Env, admin: Address) {
+    fn initialize(env: Env, admin: Address) {
+        if storage::is_initialized(&env) {
+            panic_with_error!(env, Error::AlreadyInitialized);
+        }
+
+        admin.require_auth();
+
+        storage::set_initialized(&env);
         storage::set_admin(&env, &admin);
 
         Initialized { admin }.publish(&env);

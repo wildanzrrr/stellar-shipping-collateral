@@ -8,4 +8,7 @@ pub enum Error {
     InvalidAmount = 2,
     InsufficientBalance = 3,
     ArithmeticOverflow = 4,
+    PermitExpired = 5,
+    PermitAlreadyUsed = 6,
+    AlreadyInitialized = 7,
 }

@@ -20,7 +20,9 @@ impl TestFixture {
 
         let admin = <soroban_sdk::Address as Address>::generate(&env);
         let token = <soroban_sdk::Address as Address>::generate(&env);
-        let contract_id = env.register(Compliance, (admin.clone(),));
+        let contract_id = env.register(Compliance, ());
+        let client = ComplianceClient::new(&env, &contract_id);
+        client.initialize(&admin);
 
         Self {
             env,
@@ -188,4 +190,21 @@ fn admin_can_set_max_balance() {
 
     assert_eq!(contract_events, [expected_event]);
     assert_eq!(client.max_balance(&fixture.token), 1_000);
+}
+
+#[test]
+fn initialize_failed_because_already_initialized() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = <soroban_sdk::Address as Address>::generate(&env);
+    let contract_id = env.register(Compliance, ());
+    let client = ComplianceClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+
+    assert_eq!(
+        client.try_initialize(&admin),
+        Err(Ok(Error::AlreadyInitialized.into()))
+    );
 }

@@ -1,16 +1,16 @@
 #![no_std]
-use compliance::{types::AccountSnapshot, types::TransferKind, ComplianceClient};
-use identity_verifier::IdentityVerifierClient;
-use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Env, String};
+use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, String};
 
 mod errors;
 mod events;
+mod external;
 mod interface;
 mod storage;
 mod types;
 
 use crate::errors::Error;
 use crate::events::{Burn, Initialized, Mint, Transfer};
+use crate::external::{AccountSnapshot, ComplianceClient, IdentityVerifierClient, TransferKind};
 use crate::interface::Sep57Interface;
 
 #[contract]
@@ -18,16 +18,25 @@ pub struct SEP57;
 
 #[contractimpl]
 impl Sep57Interface for SEP57 {
-    fn __constructor(
+    fn initialize(
         env: Env,
         admin: Address,
         identity_verifier: Address,
         compliance: Address,
+        admin_signer: BytesN<32>,
         name: String,
         symbol: String,
         decimals: u32,
     ) {
+        if storage::is_initialized(&env) {
+            panic_with_error!(env, Error::AlreadyInitialized);
+        }
+
+        admin.require_auth();
+
+        storage::set_initialized(&env);
         storage::set_admin(&env, &admin);
+        storage::set_admin_signer(&env, &admin_signer);
         storage::set_identity_verifier(&env, &identity_verifier);
         storage::set_compliance(&env, &compliance);
         storage::set_name(&env, &name);
@@ -45,10 +54,10 @@ impl Sep57Interface for SEP57 {
         .publish(&env);
     }
 
-    fn mint(env: Env, to: Address, amount: i128, operator: Address) {
-        operator.require_auth();
-        storage::require_admin(&env, &operator);
+    fn mint(env: Env, to: Address, amount: i128, nonce: u64, deadline: u32, signature: BytesN<64>) {
+        require_initialized(&env);
         require_positive(&env, amount);
+        require_admin_permit(&env, 1, &to, amount, nonce, deadline, &signature);
 
         identity_client(&env).verify_identity(&to);
 
@@ -64,6 +73,7 @@ impl Sep57Interface for SEP57 {
     }
 
     fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+        require_initialized(&env);
         from.require_auth();
         require_positive(&env, amount);
 
@@ -90,10 +100,17 @@ impl Sep57Interface for SEP57 {
         Transfer { from, to, amount }.publish(&env);
     }
 
-    fn burn(env: Env, from: Address, amount: i128, operator: Address) {
-        operator.require_auth();
-        storage::require_admin(&env, &operator);
+    fn burn(
+        env: Env,
+        from: Address,
+        amount: i128,
+        nonce: u64,
+        deadline: u32,
+        signature: BytesN<64>,
+    ) {
+        require_initialized(&env);
         require_positive(&env, amount);
+        require_admin_permit(&env, 2, &from, amount, nonce, deadline, &signature);
 
         let from_balance = storage::balance(&env, &from);
         let supply = storage::total_supply(&env);
@@ -171,6 +188,69 @@ fn require_balance(env: &Env, balance: i128, amount: i128) {
     if balance < amount {
         panic_with_error!(env, Error::InsufficientBalance);
     }
+}
+
+fn require_initialized(env: &Env) {
+    if !storage::is_initialized(env) {
+        panic_with_error!(env, Error::Unauthorized);
+    }
+}
+
+fn require_admin_permit(
+    env: &Env,
+    action: u8,
+    account: &Address,
+    amount: i128,
+    nonce: u64,
+    deadline: u32,
+    signature: &BytesN<64>,
+) {
+    if env.ledger().sequence() >= deadline {
+        panic_with_error!(env, Error::PermitExpired);
+    }
+
+    if storage::nonce_used(env, nonce) {
+        panic_with_error!(env, Error::PermitAlreadyUsed);
+    }
+
+    let message = permit_message(
+        env,
+        &env.current_contract_address(),
+        action,
+        account,
+        amount,
+        nonce,
+        deadline,
+    );
+    env.crypto()
+        .ed25519_verify(&storage::admin_signer(env), &message, signature);
+    storage::set_nonce_used(env, nonce);
+}
+
+fn permit_message(
+    env: &Env,
+    contract: &Address,
+    action: u8,
+    account: &Address,
+    amount: i128,
+    nonce: u64,
+    deadline: u32,
+) -> Bytes {
+    let mut message = Bytes::new(env);
+    message.extend_from_slice(b"SEP57_PERMIT_V1");
+    message.push_back(action);
+    append_address(&mut message, contract);
+    append_address(&mut message, account);
+    message.extend_from_slice(&amount.to_be_bytes());
+    message.extend_from_slice(&nonce.to_be_bytes());
+    message.extend_from_slice(&deadline.to_be_bytes());
+    message
+}
+
+fn append_address(message: &mut Bytes, address: &Address) {
+    let bytes = address.to_string().to_bytes();
+    message.extend_from_slice(&bytes.len().to_be_bytes());
+    message.append(&bytes);
 }
 
 fn checked_add(env: &Env, left: i128, right: i128) -> i128 {

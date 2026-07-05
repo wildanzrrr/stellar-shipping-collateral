@@ -1181,6 +1181,7 @@ name = "sep57"
 version = "0.0.0"
 dependencies = [
  "compliance",
+ "ed25519-dalek",
  "identity-verifier",
  "soroban-sdk",
 ]
