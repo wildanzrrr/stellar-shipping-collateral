@@ -1,0 +1,19 @@
+[package]
+name = "factory"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["lib", "cdylib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+ed25519-dalek = "2.2.0"
+sep57 = { path = "../sep57" }
+compliance = { path = "../compliance" }
+identity-verifier = { path = "../identity-verifier" }
