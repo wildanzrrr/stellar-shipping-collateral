@@ -1,8 +1,10 @@
 #![cfg(test)]
 
 use super::*;
-use compliance::{Compliance, ComplianceClient};
-use identity_verifier::{IdentityVerifier, IdentityVerifierClient};
+use compliance::{Compliance, ComplianceClient, Error as ComplianceError};
+use identity_verifier::{
+    Error as IdentityVerifierError, IdentityRole, IdentityVerifier, IdentityVerifierClient,
+};
 use soroban_sdk::{testutils::Address, Env, String};
 
 struct TestFixture {
@@ -119,9 +121,69 @@ fn admin_cannot_mint_with_negative_amount() {
 }
 
 #[test]
+fn mint_failed_because_identity_not_found() {
+    let fixture = TestFixture::new();
+    let token = fixture.token();
+
+    assert_eq!(
+        token.try_mint(&fixture.alice, &400, &fixture.admin),
+        Err(Ok(IdentityVerifierError::IdentityNotFound.into()))
+    );
+}
+
+#[test]
+fn mint_failed_because_identity_not_verified() {
+    let fixture = TestFixture::new();
+    let token = fixture.token();
+    let country_code = String::from_str(&fixture.env, "IDN");
+
+    fixture.identity().set_identity(
+        &fixture.alice,
+        &false,
+        &country_code,
+        &IdentityRole::KYC,
+        &fixture.admin,
+    );
+
+    assert_eq!(
+        token.try_mint(&fixture.alice, &400, &fixture.admin),
+        Err(Ok(IdentityVerifierError::IdentityNotVerified.into()))
+    );
+}
+
+#[test]
+fn mint_failed_because_max_balance_exceeded() {
+    let fixture = TestFixture::new();
+    let token = fixture.token();
+    let country_code = String::from_str(&fixture.env, "IDN");
+
+    fixture.identity().set_identity(
+        &fixture.alice,
+        &true,
+        &country_code,
+        &IdentityRole::KYC,
+        &fixture.admin,
+    );
+
+    assert_eq!(
+        token.try_mint(&fixture.alice, &1_001, &fixture.admin),
+        Err(Ok(ComplianceError::MaxBalanceExceeded.into()))
+    );
+}
+
+#[test]
 fn mint_succeeds_for_verified_user() {
     let fixture = TestFixture::new();
     let token = fixture.token();
+    let country_code = String::from_str(&fixture.env, "IDN");
+
+    fixture.identity().set_identity(
+        &fixture.alice,
+        &true,
+        &country_code,
+        &IdentityRole::KYC,
+        &fixture.admin,
+    );
 
     token.mint(&fixture.alice, &400, &fixture.admin);
 
@@ -129,96 +191,285 @@ fn mint_succeeds_for_verified_user() {
     assert_eq!(token.total_supply(), 400);
 }
 
-// #[test]
-// #[should_panic]
-// fn mint_panics_for_unverified_user() {
-//     let fixture = TestFixture::new();
-//     let token = fixture.token();
-//     let unverified = fixture.address();
+#[test]
+fn mint_all_to_the_smart_contract_factory() {
+    let fixture = TestFixture::new();
+    let token = fixture.token();
+    let country_code = String::from_str(&fixture.env, "IDN");
+    let factory_address = fixture.compliance_id.clone();
 
-//     token.mint(&unverified, &400, &fixture.admin);
-// }
+    fixture.identity().set_identity(
+        &factory_address,
+        &true,
+        &country_code,
+        &IdentityRole::KYB,
+        &fixture.admin,
+    );
 
-// #[test]
-// #[should_panic]
-// fn mint_panics_when_compliance_max_balance_exceeded() {
-//     let fixture = TestFixture::new();
-//     let token = fixture.token();
+    token.mint(&factory_address, &1_000, &fixture.admin);
 
-//     token.mint(&fixture.alice, &1_001, &fixture.admin);
-// }
+    assert_eq!(token.balance(&factory_address), 1_000);
+    assert_eq!(token.total_supply(), 1_000);
+}
 
-// #[test]
-// fn transfer_succeeds_between_verified_users() {
-//     let fixture = TestFixture::new();
-//     let token = fixture.token();
+#[test]
+fn transfer_failed_because_amount_not_positive() {
+    let fixture = TestFixture::new();
+    let token = fixture.token();
+    let country_code = String::from_str(&fixture.env, "IDN");
 
-//     token.mint(&fixture.alice, &500, &fixture.admin);
-//     token.transfer(&fixture.alice, &fixture.bob, &200);
+    fixture.identity().set_identity(
+        &fixture.alice,
+        &true,
+        &country_code,
+        &IdentityRole::KYC,
+        &fixture.admin,
+    );
 
-//     assert_eq!(token.balance(&fixture.alice), 300);
-//     assert_eq!(token.balance(&fixture.bob), 200);
-//     assert_eq!(token.total_supply(), 500);
-// }
+    fixture.identity().set_identity(
+        &fixture.bob,
+        &true,
+        &country_code,
+        &IdentityRole::KYC,
+        &fixture.admin,
+    );
 
-// #[test]
-// #[should_panic]
-// fn transfer_panics_for_unverified_receiver() {
-//     let fixture = TestFixture::new();
-//     let token = fixture.token();
-//     let unverified = fixture.address();
+    token.mint(&fixture.alice, &400, &fixture.admin);
 
-//     token.mint(&fixture.alice, &500, &fixture.admin);
-//     token.transfer(&fixture.alice, &unverified, &200);
-// }
+    assert_eq!(
+        token.try_transfer(&fixture.alice, &fixture.bob, &-100),
+        Err(Ok(Error::InvalidAmount.into()))
+    );
+}
 
-// #[test]
-// #[should_panic]
-// fn transfer_panics_when_compliance_max_balance_exceeded() {
-//     let fixture = TestFixture::new();
-//     let token = fixture.token();
+#[test]
+fn transfer_failed_because_from_identity_not_verified() {
+    let fixture = TestFixture::new();
+    let token = fixture.token();
+    let country_code = String::from_str(&fixture.env, "IDN");
 
-//     token.mint(&fixture.alice, &1_000, &fixture.admin);
-//     token.mint(&fixture.bob, &900, &fixture.admin);
-//     token.transfer(&fixture.alice, &fixture.bob, &101);
-// }
+    fixture.identity().set_identity(
+        &fixture.alice,
+        &false,
+        &country_code,
+        &IdentityRole::KYC,
+        &fixture.admin,
+    );
 
-// #[test]
-// #[should_panic]
-// fn transfer_panics_with_insufficient_balance() {
-//     let fixture = TestFixture::new();
-//     let token = fixture.token();
+    fixture.identity().set_identity(
+        &fixture.bob,
+        &true,
+        &country_code,
+        &IdentityRole::KYC,
+        &fixture.admin,
+    );
 
-//     token.transfer(&fixture.alice, &fixture.bob, &1);
-// }
+    token.mint(&fixture.bob, &400, &fixture.admin);
 
-// #[test]
-// fn burn_succeeds_by_admin() {
-//     let fixture = TestFixture::new();
-//     let token = fixture.token();
+    assert_eq!(
+        token.try_transfer(&fixture.alice, &fixture.bob, &100),
+        Err(Ok(IdentityVerifierError::IdentityNotVerified.into()))
+    );
+}
 
-//     token.mint(&fixture.alice, &500, &fixture.admin);
-//     token.burn(&fixture.alice, &200, &fixture.admin);
+#[test]
+fn transfer_failed_because_to_identity_not_verified() {
+    let fixture = TestFixture::new();
+    let token = fixture.token();
+    let country_code = String::from_str(&fixture.env, "IDN");
 
-//     assert_eq!(token.balance(&fixture.alice), 300);
-//     assert_eq!(token.total_supply(), 300);
-// }
+    fixture.identity().set_identity(
+        &fixture.alice,
+        &true,
+        &country_code,
+        &IdentityRole::KYC,
+        &fixture.admin,
+    );
 
-// #[test]
-// #[should_panic]
-// fn burn_panics_by_non_admin() {
-//     let fixture = TestFixture::new();
-//     let token = fixture.token();
+    fixture.identity().set_identity(
+        &fixture.bob,
+        &false,
+        &country_code,
+        &IdentityRole::KYC,
+        &fixture.admin,
+    );
 
-//     token.mint(&fixture.alice, &500, &fixture.admin);
-//     token.burn(&fixture.alice, &200, &fixture.bob);
-// }
+    token.mint(&fixture.alice, &400, &fixture.admin);
 
-// #[test]
-// #[should_panic]
-// fn burn_panics_with_insufficient_balance() {
-//     let fixture = TestFixture::new();
-//     let token = fixture.token();
+    assert_eq!(
+        token.try_transfer(&fixture.alice, &fixture.bob, &100),
+        Err(Ok(IdentityVerifierError::IdentityNotVerified.into()))
+    );
+}
 
-//     token.burn(&fixture.alice, &1, &fixture.admin);
-// }
+#[test]
+fn transfer_failed_because_insufficient_balance() {
+    let fixture = TestFixture::new();
+    let token = fixture.token();
+    let country_code = String::from_str(&fixture.env, "IDN");
+
+    fixture.identity().set_identity(
+        &fixture.alice,
+        &true,
+        &country_code,
+        &IdentityRole::KYC,
+        &fixture.admin,
+    );
+
+    fixture.identity().set_identity(
+        &fixture.bob,
+        &true,
+        &country_code,
+        &IdentityRole::KYC,
+        &fixture.admin,
+    );
+
+    token.mint(&fixture.alice, &400, &fixture.admin);
+
+    assert_eq!(
+        token.try_transfer(&fixture.alice, &fixture.bob, &500),
+        Err(Ok(Error::InsufficientBalance.into()))
+    );
+}
+
+#[test]
+fn transfer_succeeds_for_verified_users() {
+    let fixture = TestFixture::new();
+    let token = fixture.token();
+    let country_code = String::from_str(&fixture.env, "IDN");
+
+    fixture.identity().set_identity(
+        &fixture.alice,
+        &true,
+        &country_code,
+        &IdentityRole::KYC,
+        &fixture.admin,
+    );
+
+    fixture.identity().set_identity(
+        &fixture.bob,
+        &true,
+        &country_code,
+        &IdentityRole::KYC,
+        &fixture.admin,
+    );
+
+    token.mint(&fixture.alice, &400, &fixture.admin);
+
+    token.transfer(&fixture.alice, &fixture.bob, &100);
+    assert_eq!(token.balance(&fixture.alice), 300);
+    assert_eq!(token.balance(&fixture.bob), 100);
+}
+
+#[test]
+fn burn_failed_because_amount_not_positive() {
+    let fixture = TestFixture::new();
+    let token = fixture.token();
+    let country_code = String::from_str(&fixture.env, "IDN");
+
+    fixture.identity().set_identity(
+        &fixture.alice,
+        &true,
+        &country_code,
+        &IdentityRole::KYC,
+        &fixture.admin,
+    );
+
+    token.mint(&fixture.alice, &400, &fixture.admin);
+
+    assert_eq!(
+        token.try_burn(&fixture.alice, &-100, &fixture.admin),
+        Err(Ok(Error::InvalidAmount.into()))
+    );
+}
+
+#[test]
+fn burn_failed_because_operator_is_not_admin() {
+    let fixture = TestFixture::new();
+    let token = fixture.token();
+    let country_code = String::from_str(&fixture.env, "IDN");
+
+    fixture.identity().set_identity(
+        &fixture.alice,
+        &true,
+        &country_code,
+        &IdentityRole::KYC,
+        &fixture.admin,
+    );
+
+    token.mint(&fixture.alice, &400, &fixture.admin);
+
+    assert_eq!(
+        token.try_burn(&fixture.alice, &100, &fixture.bob),
+        Err(Ok(Error::Unauthorized.into()))
+    );
+}
+
+#[test]
+fn burn_failed_because_insufficient_balance() {
+    let fixture = TestFixture::new();
+    let token = fixture.token();
+    let country_code = String::from_str(&fixture.env, "IDN");
+
+    fixture.identity().set_identity(
+        &fixture.alice,
+        &true,
+        &country_code,
+        &IdentityRole::KYC,
+        &fixture.admin,
+    );
+
+    token.mint(&fixture.alice, &400, &fixture.admin);
+
+    assert_eq!(
+        token.try_burn(&fixture.alice, &500, &fixture.admin),
+        Err(Ok(Error::InsufficientBalance.into()))
+    );
+}
+
+#[test]
+fn burn_succeeds_for_verified_user() {
+    let fixture = TestFixture::new();
+    let token = fixture.token();
+    let country_code = String::from_str(&fixture.env, "IDN");
+
+    fixture.identity().set_identity(
+        &fixture.alice,
+        &true,
+        &country_code,
+        &IdentityRole::KYC,
+        &fixture.admin,
+    );
+
+    token.mint(&fixture.alice, &400, &fixture.admin);
+
+    token.burn(&fixture.alice, &100, &fixture.admin);
+    assert_eq!(token.balance(&fixture.alice), 300);
+    assert_eq!(token.total_supply(), 300);
+}
+
+#[test]
+fn mint_failed_because_arithmetic_overflow() {
+    let fixture = TestFixture::new();
+    let token = fixture.token();
+    let country_code = String::from_str(&fixture.env, "IDN");
+
+    fixture
+        .compliance()
+        .set_max_balance(&fixture.token_id, &i128::MAX, &fixture.admin);
+
+    fixture.identity().set_identity(
+        &fixture.alice,
+        &true,
+        &country_code,
+        &IdentityRole::KYC,
+        &fixture.admin,
+    );
+
+    token.mint(&fixture.alice, &i128::MAX, &fixture.admin);
+
+    assert_eq!(
+        token.try_mint(&fixture.alice, &1, &fixture.admin),
+        Err(Ok(Error::ArithmeticOverflow.into()))
+    );
+}

@@ -7,6 +7,7 @@ mod errors;
 mod events;
 mod interface;
 mod storage;
+mod types;
 
 use crate::errors::Error;
 use crate::events::{Burn, Initialized, Mint, Transfer};

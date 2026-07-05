@@ -7,7 +7,7 @@ mod interface;
 mod storage;
 pub mod types;
 
-use crate::errors::Error;
+pub use crate::errors::Error;
 use crate::events::{Initialized, MaxBalanceSet, TokenBound, TokenUnbound};
 use crate::interface::ComplianceInterface;
 use crate::types::{AccountSnapshot, TransferKind};
