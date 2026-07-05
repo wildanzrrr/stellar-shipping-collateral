@@ -14,16 +14,16 @@ pub fn is_initialized(env: &Env) -> bool {
         .unwrap_or(false)
 }
 
-pub fn set_admin(env: &Env, admin: &Address) {
-    env.storage().instance().set(&DataKey::Admin, admin);
+pub fn set_operator(env: &Env, operator: &Address) {
+    env.storage().instance().set(&DataKey::Operator, operator);
 }
 
-pub fn admin(env: &Env) -> Address {
-    env.storage().instance().get(&DataKey::Admin).unwrap()
+pub fn operator(env: &Env) -> Address {
+    env.storage().instance().get(&DataKey::Operator).unwrap()
 }
 
-pub fn require_admin(env: &Env, operator: &Address) {
-    if admin(env) != *operator {
+pub fn require_operator(env: &Env, caller: &Address) {
+    if operator(env) != *caller {
         panic_with_error!(env, Error::Unauthorized);
     }
 }

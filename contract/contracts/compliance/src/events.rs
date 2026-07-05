@@ -3,7 +3,7 @@ use soroban_sdk::{contractevent, Address};
 #[contractevent]
 pub struct Initialized {
     #[topic]
-    pub admin: Address,
+    pub operator: Address,
 }
 
 #[contractevent]
