@@ -80,14 +80,18 @@ impl FactoryInterface for Factory {
         deadline: u32,
         mint_signature: BytesN<64>,
     ) {
-        require_initialized(&env);
         shipper.require_auth();
+        require_initialized(&env);
         require_positive(&env, raise_amount);
         require_interest_bps(&env, interest_bps);
         require_future_ledger(&env, due_ledger);
-
-        // KYB verification: shipper must be a verified shipping company.
         require_role(&env, &shipper, IdentityRole::KYB);
+
+        // Reject expired mint permits up front so the failure mode is a
+        // factory error, not a generic panic from the sep57 token contract.
+        if deadline < env.ledger().sequence() {
+            panic_with_error!(env, Error::InvalidDeadline);
+        }
 
         let proto_bps = storage::protocol_fee_bps(&env);
         let interest_fee = raise_amount * interest_bps / 10_000;
@@ -95,13 +99,10 @@ impl FactoryInterface for Factory {
         let upfront = interest_fee + protocol_fee;
 
         // Pull upfront USDC (interest pool + protocol fee) from shipper.
-        // Shipper must have approved the factory as spender beforehand.
         let factory_addr = env.current_contract_address();
         usdc_client(&env).transfer_from(&factory_addr, &shipper, &factory_addr, &upfront);
 
-        // Deterministically deploy a new sep57 token. Backend precomputes the
-        // resulting address (env.deployer().with_current_contract(salt).deployed_address())
-        // to sign the mint permit over the not-yet-deployed token in the same tx.
+        // Deterministically deploy a new sep57 token contract.
         let wasm_hash = storage::sep57_wasm_hash(&env);
         let token_addr = env
             .deployer()
@@ -110,7 +111,6 @@ impl FactoryInterface for Factory {
 
         // Initialize the new RWA token: factory is its admin so it can drive
         // transfers and relay mint/burn permits.
-        let factory_addr = env.current_contract_address();
         sep57_client(&env, &token_addr).initialize(
             &factory_addr,
             &storage::identity_verifier(&env),
@@ -284,6 +284,10 @@ impl FactoryInterface for Factory {
         let mut offering = storage::get_rwa(&env, rwa_id);
         if offering.status != RWAStatus::Settled {
             panic_with_error!(env, Error::RwaNotSettled);
+        }
+        // Reject expired burn permits up front.
+        if deadline < env.ledger().sequence() {
+            panic_with_error!(env, Error::InvalidDeadline);
         }
 
         // Confirm the investor actually holds the claimed allocation.

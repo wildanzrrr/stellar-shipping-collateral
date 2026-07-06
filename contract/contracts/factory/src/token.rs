@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, Env, MuxedAddress, String, Symbol,
+    contract, contractevent, contractimpl, contracttype, Address, Env, MuxedAddress, String,
 };
 
 #[contracttype]
@@ -13,6 +13,32 @@ enum DataKey {
     Decimals,
     Name,
     Symbol,
+}
+
+#[contractevent]
+pub struct Approve {
+    #[topic]
+    from: Address,
+    #[topic]
+    spender: Address,
+    amount: i128,
+    live_until_ledger: u32,
+}
+
+#[contractevent]
+pub struct Transfer {
+    #[topic]
+    from: Address,
+    #[topic]
+    to: Address,
+    amount: i128,
+}
+
+#[contractevent]
+pub struct Burn {
+    #[topic]
+    from: Address,
+    amount: i128,
 }
 
 #[contract]
@@ -86,26 +112,32 @@ impl MockToken {
         env.storage()
             .instance()
             .set(&key, &(amount, live_until_ledger));
-        env.events().publish(
-            (symbol_short!("approve"), from, spender),
-            (amount, live_until_ledger),
-        );
+        Approve {
+            from,
+            spender,
+            amount,
+            live_until_ledger,
+        }
+        .publish(&env);
     }
 
     pub fn transfer(env: Env, from: Address, to: MuxedAddress, amount: i128) {
         from.require_auth();
         let to_addr = to.address();
         move_balance(&env, &from, &to_addr, amount);
-        env.events()
-            .publish((symbol_short!("transfer"), from, to_addr), amount);
+        Transfer {
+            from,
+            to: to_addr,
+            amount,
+        }
+        .publish(&env);
     }
 
     pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
         spender.require_auth();
         spend_allowance(&env, &from, &spender, amount);
         move_balance(&env, &from, &to, amount);
-        env.events()
-            .publish((symbol_short!("transfer"), from, to), amount);
+        Transfer { from, to, amount }.publish(&env);
     }
 
     pub fn burn(env: Env, from: Address, amount: i128) {
@@ -116,7 +148,7 @@ impl MockToken {
             panic!("insufficient balance");
         }
         env.storage().instance().set(&key, &(current - amount));
-        env.events().publish((symbol_short!("burn"), from), amount);
+        Burn { from, amount }.publish(&env);
     }
 
     pub fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
@@ -128,7 +160,7 @@ impl MockToken {
             panic!("insufficient balance");
         }
         env.storage().instance().set(&key, &(current - amount));
-        env.events().publish((symbol_short!("burn"), from), amount);
+        Burn { from, amount }.publish(&env);
     }
 
     // ---- test helper ----
@@ -178,7 +210,3 @@ fn spend_allowance(env: &Env, from: &Address, spender: &Address, amount: i128) {
         .instance()
         .set(&key, &(current - amount, live_until));
 }
-
-// Keep the unused import warning quiet.
-#[allow(dead_code)]
-const _UNUSED: Symbol = symbol_short!("x");
