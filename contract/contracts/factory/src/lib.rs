@@ -140,8 +140,11 @@ impl FactoryInterface for Factory {
             &mint_signature,
         );
 
-        // Register the offering. `shares_reserved` = upfront tokens held by the
-        // factory to back the prepaid interest pool + protocol fee.
+        // Register the offering. The factory sells 100% of the raise to
+        // investors; the upfront interest + protocol fee are paid in USDC,
+        // not by reserving RWA tokens. `shares_reserved` is kept at 0 for
+        // storage-layout compatibility with older RWAs (it's read-only
+        // accounting and no longer participates in `shares_available`).
         let id = storage::next_rwa_id(&env);
         let offering = RWAOffering {
             id,
@@ -153,7 +156,7 @@ impl FactoryInterface for Factory {
             protocol_fee_pool: protocol_fee,
             principal_pool: 0,
             shares_total: raise_amount,
-            shares_reserved: upfront,
+            shares_reserved: 0,
             shares_bought: 0,
             investors: Map::new(&env),
             due_ledger,
@@ -296,6 +299,17 @@ impl FactoryInterface for Factory {
             panic_with_error!(env, Error::InsufficientPool);
         }
 
+        // Verify the factory can pay out before burning the investor's RWA
+        // — if the shipper underpaid, the investor's tokens stay intact and
+        // the failure mode is a clean factory error.
+        if offering.principal_pool < amount {
+            panic_with_error!(env, Error::InsufficientPool);
+        }
+        let interest = amount * offering.interest_bps / 10_000;
+        if offering.interest_pool < interest {
+            panic_with_error!(env, Error::InsufficientPool);
+        }
+
         // Burn the investor's RWA tokens. The burn permit is signed off-chain
         // by the admin signer over (action=2, account=investor, amount, contract=token).
         sep57_client(&env, &offering.token).burn(
@@ -308,14 +322,6 @@ impl FactoryInterface for Factory {
 
         // Principal: 1:1 from the principal pool. Interest: pro-rata from the
         // prepaid interest pool (amount * interest_bps / 10000).
-        if offering.principal_pool < amount {
-            panic_with_error!(env, Error::InsufficientPool);
-        }
-        let interest = amount * offering.interest_bps / 10_000;
-        if offering.interest_pool < interest {
-            panic_with_error!(env, Error::InsufficientPool);
-        }
-
         let payout = checked_add(&env, amount, interest);
         usdc_client(&env).transfer(
             &env.current_contract_address(),

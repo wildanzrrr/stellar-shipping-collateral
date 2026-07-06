@@ -64,8 +64,11 @@ pub struct RWAView {
 }
 
 impl RWAOffering {
+    /// Shares still on sale. The factory sells 100% of the raise to investors
+    /// directly; the upfront interest + protocol fee is paid in USDC, not by
+    /// holding back RWA tokens.
     pub fn shares_available(&self) -> i128 {
-        self.shares_total - self.shares_reserved - self.shares_bought
+        self.shares_total - self.shares_bought
     }
 
     pub fn into_view(&self, protocol_fee_bps: i128) -> RWAView {

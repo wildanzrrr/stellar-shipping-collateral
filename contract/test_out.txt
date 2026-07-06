@@ -1,0 +1,3 @@
+   Compiling factory v0.0.0 (/Users/danzrrr/Documents/RESEARCH/stellar-app/sep57/contract/contracts/factory)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.13s
+     Running unittests src/lib.rs (target/debug/deps/factory-5709eaaa9a013c67)

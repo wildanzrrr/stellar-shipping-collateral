@@ -10,7 +10,7 @@ use identity_verifier::{IdentityRole, IdentityVerifier, IdentityVerifierClient};
 use sep57::SEP57Client;
 use soroban_sdk::{
     testutils::{Address, Ledger},
-    Bytes, BytesN, ConversionError, Env, InvokeError, String, Vec,
+    Bytes, BytesN, ConversionError, Env, InvokeError, String,
 };
 use token::{MockToken, MockTokenClient};
 
@@ -514,11 +514,15 @@ fn create_rwa_token_success() {
     let shipper_usdc_expected = usdc_units(500) - upfront; // 500 - 250
     assert_eq!(shipper_usdc_current_balance, shipper_usdc_expected);
 
-    // RWA token: factory mints the full 10K raise to itself.
+    // RWA token: factory mints the full 10K raise to itself. The factory
+    // does NOT reserve any shares — the upfront fees are paid in USDC, not
+    // by holding back RWA. So `shares_available` equals `raise_amount`.
     let token = SEP57Client::new(&f.env, &rwa.token);
     let factory_id = f.factory_id.clone();
     assert_eq!(token.balance(&factory_id), usdc_units(10_000));
     assert_eq!(token.total_supply(), usdc_units(10_000));
+    assert_eq!(rwa.shares_reserved, 0);
+    assert_eq!(rwa.shares_available, rwa.raise_amount);
 }
 
 #[test]
@@ -633,13 +637,13 @@ fn buy_shares_success() {
     assert!(available > 0);
 
     // Pre-state: factory holds the entire raise_amount of RWA tokens
-    // (minted at create_rwa time). `upfront` of those are conceptually
-    // reserved as the interest + protocol fee pool; the rest is for sale.
+    // (minted at create_rwa time) and the full raise is for sale. The
+    // upfront USDC sits in the factory as the interest + protocol fee pool.
     // Investor starts with 0 RWA + 0 USDC.
     let token = SEP57Client::new(&f.env, &rwa.token);
     let factory_addr = f.factory_id.clone();
     let investor = f.investor.clone();
-    let upfront = rwa.raise_amount - available; // shares_reserved at create time
+    let upfront = usdc_units(10_000) * (200 + PROTOCOL_FEE_BPS) / 10_000; // 250 USDC
     assert_eq!(token.balance(&factory_addr), rwa.raise_amount);
     assert_eq!(token.balance(&investor), 0);
     assert_eq!(f.usdc_balance(&factory_addr), upfront);
@@ -647,23 +651,137 @@ fn buy_shares_success() {
 
     // Fund investor with enough USDC for the purchase plus a 100-USDC buffer.
     f.usdc()
-        .transfer(&f.admin, &f.investor, &(available + usdc_units(100)));
-    f.approve_factory(&f.investor, available);
+        .transfer(&f.admin, &f.investor, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&f.investor, rwa.raise_amount);
 
     // Execute the buy.
     let before = f.factory().get_rwa(&rwa_id).shares_available;
-    f.factory().buy_shares(&rwa_id, &f.investor, &available);
+    f.factory()
+        .buy_shares(&rwa_id, &f.investor, &rwa.raise_amount);
     let after = f.factory().get_rwa(&rwa_id).shares_available;
-    assert_eq!(after, before - available);
+    assert_eq!(after, before - rwa.raise_amount);
     assert_eq!(f.factory().rwa_status(&rwa_id), RWAStatus::Funded);
 
-    // Post-state: `available` shares moved factory → investor. Factory
-    // keeps the `upfront` tokens (interest pool + protocol fee backing).
-    assert_eq!(token.balance(&factory_addr), upfront);
-    assert_eq!(token.balance(&investor), available);
+    // Post-state: the FULL raise moved factory → investor. Factory holds 0
+    // RWA after a fully bought offering — all RWA lives in investor wallets.
+    assert_eq!(token.balance(&factory_addr), 0);
+    assert_eq!(token.balance(&investor), rwa.raise_amount);
 
     // USDC moved investor → factory 1:1 with the buy. Investor keeps the
-    // 100-USDC buffer they were given.
-    assert_eq!(f.usdc_balance(&factory_addr), upfront + available);
+    // 100-USDC buffer they were given. Factory now holds upfront + raise.
+    assert_eq!(f.usdc_balance(&factory_addr), upfront + rwa.raise_amount);
     assert_eq!(f.usdc_balance(&investor), usdc_units(100));
+}
+
+/// After a 100% buy-through the factory must hold 0 RWA tokens, and the
+/// investor must hold the entire raise. This is the invariant the previous
+/// "reserve" model violated.
+#[test]
+fn buy_shares_full_sell_through_drains_factory() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    let rwa = f.factory().get_rwa(&rwa_id);
+    let token = SEP57Client::new(&f.env, &rwa.token);
+    let factory_addr = f.factory_id.clone();
+
+    // Funding the full raise in one shot.
+    f.usdc()
+        .transfer(&f.admin, &f.investor, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&f.investor, rwa.raise_amount);
+    f.factory()
+        .buy_shares(&rwa_id, &f.investor, &rwa.raise_amount);
+
+    assert_eq!(f.factory().rwa_status(&rwa_id), RWAStatus::Funded);
+    assert_eq!(token.balance(&factory_addr), 0);
+    assert_eq!(token.balance(&f.investor), rwa.raise_amount);
+    assert_eq!(f.factory().get_rwa(&rwa_id).shares_available, 0);
+    assert_eq!(f.factory().get_rwa(&rwa_id).shares_reserved, 0);
+}
+
+/// End-to-end lifecycle: create → buy-all → collect_fund → settle_debt → claim.
+/// This is the test the old "reserve" model failed. The investor must end up
+/// with `principal + interest` and the factory must close out to 0 in the
+/// principal and interest pools.
+#[test]
+fn full_lifecycle_create_buy_collect_settle_claim() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+    let rwa = f.factory().get_rwa(&rwa_id);
+
+    let investor = f.investor.clone();
+    let factory_addr = f.factory_id.clone();
+    let token = SEP57Client::new(&f.env, &rwa.token);
+    let upfront = usdc_units(10_000) * (200 + PROTOCOL_FEE_BPS) / 10_000; // 0.25 USDC = 2.5M raw
+                                                                          // Fixture seeded shipper with `usdc_units(500)`. After create_rwa they
+                                                                          // paid `upfront` via transfer_from, so they hold 500 - 0.25 USDC.
+    let shipper_after_create = usdc_units(500) - upfront;
+
+    // ---- buy all shares ----
+    f.usdc()
+        .transfer(&f.admin, &investor, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&investor, rwa.raise_amount);
+    f.factory()
+        .buy_shares(&rwa_id, &investor, &rwa.raise_amount);
+    assert_eq!(f.factory().rwa_status(&rwa_id), RWAStatus::Funded);
+    assert_eq!(token.balance(&factory_addr), 0);
+    assert_eq!(token.balance(&investor), rwa.raise_amount);
+    // Factory holds upfront + raise; shipper still at post-create level.
+    assert_eq!(f.usdc_balance(&factory_addr), upfront + rwa.raise_amount);
+    assert_eq!(f.usdc_balance(&f.shipper), shipper_after_create);
+
+    // ---- shipper collects the FULL raise (no upfront haircut) ----
+    f.factory().collect_fund(&rwa_id, &f.shipper);
+    // Shipper: post-create + raise_amount.
+    assert_eq!(
+        f.usdc_balance(&f.shipper),
+        shipper_after_create + rwa.raise_amount
+    );
+    // Factory: only the upfront left.
+    assert_eq!(f.usdc_balance(&factory_addr), upfront);
+
+    // ---- shipper repays principal (give them extra USDC + approve) ----
+    f.usdc()
+        .transfer(&f.admin, &f.shipper, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&f.shipper, rwa.raise_amount);
+    f.factory()
+        .settle_debt(&rwa_id, &f.shipper, &rwa.raise_amount);
+    assert_eq!(f.factory().rwa_status(&rwa_id), RWAStatus::Settled);
+    assert_eq!(f.usdc_balance(&factory_addr), upfront + rwa.raise_amount);
+
+    // ---- investor claims ----
+    let pre_claim_investor_usdc = f.usdc_balance(&investor);
+    let burn_nonce = 2u64;
+    let burn_deadline = f.deadline();
+    let burn_sig = f.signature(
+        &rwa.token,
+        2,
+        &investor,
+        rwa.raise_amount,
+        burn_nonce,
+        burn_deadline,
+    );
+    f.factory().claim(
+        &rwa_id,
+        &investor,
+        &rwa.raise_amount,
+        &burn_nonce,
+        &burn_deadline,
+        &burn_sig,
+    );
+
+    // Investor burned full raise, received principal + interest.
+    let expected_payout = rwa.raise_amount + rwa.raise_amount * rwa.interest_bps / 10_000;
+    assert_eq!(
+        f.usdc_balance(&investor),
+        pre_claim_investor_usdc + expected_payout
+    );
+    // RWA fully burned.
+    assert_eq!(token.balance(&investor), 0);
+    assert_eq!(token.total_supply(), 0);
+    // Factory is left with just the protocol fee (interest pool was drained
+    // by the claim). upfront (interest_fee + protocol_fee) - interest_paid =
+    // protocol_fee = 0.05 USDC.
+    let protocol_fee_left = upfront - rwa.raise_amount * rwa.interest_bps / 10_000;
+    assert_eq!(f.usdc_balance(&factory_addr), protocol_fee_left);
 }
