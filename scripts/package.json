@@ -6,7 +6,8 @@
   "scripts": {
     "decode": "tsx src/decode-address.ts",
     "sign:mint": "tsx src/sign-mint.ts",
-    "sign:burn": "tsx src/sign-burn.ts"
+    "sign:burn": "tsx src/sign-burn.ts",
+    "sign:create-rwa-token": "tsx src/sign-create-rwa-token.ts"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^13.0.0",

@@ -1,6 +1,7 @@
 import "dotenv/config";
 import prompts from "prompts";
-import { Keypair, StrKey, Networks, hash } from "@stellar/stellar-sdk";
+import { createHash } from "node:crypto";
+import { Keypair, StrKey, Networks, hash, xdr } from "@stellar/stellar-sdk";
 import * as bip39 from "bip39";
 import { derivePath } from "ed25519-hd-key";
 
@@ -52,6 +53,55 @@ export function getNetworkPassphrase(): string {
   return process.env.NETWORK_PASSPHRASE || Networks.TESTNET;
 }
 
+/** Horizon base URL for the current network. Override via HORIZON_URL. */
+export function getHorizonUrl(): string {
+  if (process.env.HORIZON_URL)
+    return process.env.HORIZON_URL.replace(/\/$/, "");
+  return getNetworkPassphrase() === Networks.PUBLIC
+    ? "https://horizon.stellar.org"
+    : "https://horizon-testnet.stellar.org";
+}
+
+/** Stellar mainnet: ~5s/ledger, 17,280 ledgers per day. */
+export const LEDGERS_PER_DAY = 17_280;
+export const LEDGERS_PER_HOUR = 720;
+
+/**
+ * Fetch the latest ledger sequence from Horizon.
+ * Used as the time anchor so all deadlines/due-ledgers line up with the
+ * actual chain, not wall clock — chain can drift seconds from real time.
+ */
+export async function fetchLatestLedger(): Promise<number> {
+  const url = `${getHorizonUrl()}/ledgers?order=desc&limit=1`;
+  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!res.ok) {
+    throw new Error(
+      `Horizon request failed: ${res.status} ${res.statusText} (${url})`,
+    );
+  }
+  const body = (await res.json()) as {
+    _embedded?: { records?: { sequence?: number }[] };
+  };
+  const seq = body._embedded?.records?.[0]?.sequence;
+  if (typeof seq !== "number") {
+    throw new Error(`Horizon returned no ledger sequence (${url})`);
+  }
+  return seq;
+}
+
+/** Compute a deadline ledger `ledgersAhead` past `latestLedger`. */
+export function deadlineFromLatest(
+  latestLedger: number,
+  ledgersAhead: number,
+): number {
+  return latestLedger + ledgersAhead;
+}
+
+/** Days → ledgers (rounded). */
+export function daysToLedgers(days: number): number {
+  return Math.round(days * LEDGERS_PER_DAY);
+}
+
 /** Generate a fresh nonce. Caller may override via env NONCE. */
 export function nextNonce(): bigint {
   if (process.env.NONCE) {
@@ -64,7 +114,7 @@ export function nextNonce(): bigint {
   return n & 0xffffffffffffffffn;
 }
 
-/** Deadline in ledgers. Defaults to 1 hour (~720 ledgers) from now. */
+/** @deprecated Use deadlineFromLatest for on-chain alignment. */
 export function nextDeadline(ledgersAhead = 720): number {
   return Math.floor(Date.now() / 1000) + ledgersAhead * 5;
 }
@@ -150,15 +200,24 @@ export function toHex(bytes: Uint8Array): string {
  * Prompt the user interactively for a value, but accept an env var as a
  * non-interactive fallback. The prompt is skipped entirely if the env var
  * is set OR stdin isn't a TTY (e.g. piped/CI).
+ *
+ * If `allowEmpty` is true, an empty string is treated as a valid answer
+ * (returned as `""`) instead of throwing.
  */
 export async function ask(
   question: prompts.PromptObject,
   envFallback?: string,
+  options: { allowEmpty?: boolean } = {},
 ): Promise<string> {
   const envName = question.name as string;
   const fromEnv = envFallback ?? process.env[envName];
   if (fromEnv && fromEnv.trim() !== "") {
     return fromEnv.trim();
+  }
+  if (fromEnv !== undefined && options.allowEmpty) {
+    // Env var is unset or blank AND empty is allowed → return blank.
+    // (Env value `""` is indistinguishable from unset here, but that's the
+    // intended semantics for an "optional with random fallback" field.)
   }
   if (!process.stdin.isTTY) {
     throw new Error(
@@ -167,7 +226,11 @@ export async function ask(
   }
   const res = await prompts(question, { onCancel: () => process.exit(1) });
   const v = res[question.name as keyof typeof res];
-  if (v === undefined || v === null || (typeof v === "string" && v === "")) {
+  if (v === undefined || v === null) {
+    if (options.allowEmpty) return "";
+    throw new Error(`No value provided for ${envName}`);
+  }
+  if (typeof v === "string" && v === "" && !options.allowEmpty) {
     throw new Error(`No value provided for ${envName}`);
   }
   return String(v).trim();
@@ -182,3 +245,48 @@ export function isValidCAddress(s: string): boolean {
 }
 
 export { StrKey };
+
+/**
+ * Predict the deterministic SEP57 token address that the factory will
+ * deploy when it calls `deployer.with_address(factory, salt).deploy()`.
+ *
+ *   token_id = sha256(raw_factory_address_32 || salt_32)
+ *
+ * Mirrors `Env::deployer().with_address(deployer, salt).deployed_address()`
+ * in the Soroban host. The factory address must be a C... strkey.
+ *
+ * The host computes:
+ *   sha256( HashIdPreimage {
+ *     networkId: sha256(networkPassphrase),
+ *     contractIdPreimage: { address: deployer, salt }
+ *   } )
+ * We use stellar-base's XDR types to encode the preimage exactly the way
+ * the host does, then SHA-256 the bytes.
+ */
+export function predictTokenAddress(
+  factoryAddress: string,
+  salt: Uint8Array,
+): string {
+  if (salt.length !== 32) {
+    throw new Error(`salt must be 32 bytes, got ${salt.length}`);
+  }
+  const deployerRaw = StrKey.decodeContract(factoryAddress); // 32 bytes
+  const networkId = createHash("sha256")
+    .update(Buffer.from(getNetworkPassphrase()))
+    .digest();
+
+  const fromAddress = new xdr.ContractIdPreimageFromAddress({
+    address: xdr.ScAddress.scAddressTypeContract(deployerRaw),
+    salt: Buffer.from(salt),
+  });
+  const contractIdPreimage =
+    xdr.ContractIdPreimage.contractIdPreimageFromAddress(fromAddress);
+  const preimageCid = new xdr.HashIdPreimageContractId({
+    networkId,
+    contractIdPreimage,
+  });
+  const preimage = xdr.HashIdPreimage.envelopeTypeContractId(preimageCid);
+
+  const id = createHash("sha256").update(preimage.toXDR()).digest();
+  return StrKey.encodeContract(id);
+}
