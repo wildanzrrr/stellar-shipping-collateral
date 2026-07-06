@@ -20,6 +20,13 @@ const SEP57_WASM: &[u8] = include_bytes!("../../../target/wasm32v1-none/release/
 type TryVoid = Result<Result<(), ConversionError>, Result<soroban_sdk::Error, InvokeError>>;
 
 const PROTOCOL_FEE_BPS: i128 = 50; // 0.5%
+const USDC_SCALE: i128 = 10_000_000; // 10^7 — USDC has 7 decimals
+
+/// Convert a whole-USDC amount into the raw integer used by the token
+/// contracts (USDC has 7 decimals).
+fn usdc_units(whole: i128) -> i128 {
+    whole * USDC_SCALE
+}
 
 struct TestFixture {
     env: Env,
@@ -107,7 +114,7 @@ impl TestFixture {
 
         // Fund shipper + investor with USDC for upfront / purchase / repayment.
         let usdc = MockTokenClient::new(&env, &usdc_id);
-        usdc.mint(&admin, &2_000_000_000_000);
+        usdc.mint(&admin, &usdc_units(2_000_000)); // 2M USDC
 
         Self {
             env,
@@ -129,6 +136,10 @@ impl TestFixture {
 
     fn usdc(&self) -> MockTokenClient<'_> {
         MockTokenClient::new(&self.env, &self.usdc_id)
+    }
+
+    fn identity(&self) -> IdentityVerifierClient<'_> {
+        IdentityVerifierClient::new(&self.env, &self.identity_id)
     }
 
     fn usdc_balance(&self, addr: &soroban_sdk::Address) -> i128 {
@@ -204,7 +215,7 @@ impl TestFixture {
 
     /// Create a 10K USDC raise at 2% interest. Returns the RWA id.
     fn create_rwa(&self, salt_n: u8) -> u64 {
-        let raise_amount: i128 = 10_000_000_000; // 10K USDC @ 7 decimals
+        let raise_amount: i128 = usdc_units(10_000); // 10K USDC @ 7 decimals
         let interest_bps: i128 = 200; // 2%
         let upfront = raise_amount * (interest_bps + PROTOCOL_FEE_BPS) / 10_000; // 250 USDC
 
@@ -217,7 +228,7 @@ impl TestFixture {
 
         // Admin give shipper 500 USDC to fund the upfront interest + protocol fee.
         self.usdc()
-            .transfer(&self.admin, &self.shipper, &500_000_000_000);
+            .transfer(&self.admin, &self.shipper, &usdc_units(500));
 
         let nonce = 1;
         let deadline = self.deadline();
@@ -292,7 +303,7 @@ fn create_rwa_token_failed_contract_not_initialized() {
 
     let res: TryVoid = factory.try_create_rwa_token(
         &f.shipper,
-        &10_000_000_000,
+        &usdc_units(10_000),
         &200,
         &f.due_ledger(),
         &String::from_str(&f.env, "X"),
@@ -304,7 +315,7 @@ fn create_rwa_token_failed_contract_not_initialized() {
             &f.precompute_token_address(&f.salt(1)),
             1,
             &factory_id,
-            10_000_000_000,
+            usdc_units(10_000),
             1,
             f.deadline(),
         ),
@@ -344,7 +355,7 @@ fn create_rwa_token_failed_bps_negative() {
     let due = f.env.ledger().sequence() - 1; // expired
     let res: TryVoid = f.factory().try_create_rwa_token(
         &f.shipper,
-        &10_000_000_000,
+        &usdc_units(10_000),
         &-1,
         &due, // expired
         &String::from_str(&f.env, "X"),
@@ -356,7 +367,7 @@ fn create_rwa_token_failed_bps_negative() {
             &f.precompute_token_address(&f.salt(1)),
             1,
             &f.factory_id,
-            10_000_000_000,
+            usdc_units(10_000),
             1,
             f.deadline(),
         ),
@@ -369,7 +380,7 @@ fn create_rwa_token_failed_bps_above_cap() {
     let f = TestFixture::new();
     let res: TryVoid = f.factory().try_create_rwa_token(
         &f.shipper,
-        &10_000_000_000,
+        &usdc_units(10_000),
         &10_001,
         &f.due_ledger(),
         &String::from_str(&f.env, "X"),
@@ -381,7 +392,7 @@ fn create_rwa_token_failed_bps_above_cap() {
             &f.precompute_token_address(&f.salt(1)),
             1,
             &f.factory_id,
-            10_000_000_000,
+            usdc_units(10_000),
             1,
             f.deadline(),
         ),
@@ -395,11 +406,11 @@ fn create_rwa_token_failed_role_not_kyb() {
     let unverified = <soroban_sdk::Address as Address>::generate(&f.env);
 
     // Approve enough USDC (won't be spent because the call panics first).
-    f.approve_factory(&unverified, 1_000_000_000);
+    f.approve_factory(&unverified, usdc_units(100));
 
     let res: TryVoid = f.factory().try_create_rwa_token(
         &unverified,
-        &10_000_000_000,
+        &usdc_units(10_000),
         &200,
         &f.due_ledger(),
         &String::from_str(&f.env, "X"),
@@ -411,7 +422,7 @@ fn create_rwa_token_failed_role_not_kyb() {
             &f.precompute_token_address(&f.salt(1)),
             1,
             &f.factory_id,
-            10_000_000_000,
+            usdc_units(10_000),
             1,
             f.deadline(),
         ),
@@ -426,7 +437,7 @@ fn create_rwa_token_failed_deadline_expired() {
     let expired_deadline = f.env.ledger().sequence() - 1; // expired
     let res: TryVoid = f.factory().try_create_rwa_token(
         &f.shipper,
-        &10_000_000_000,
+        &usdc_units(10_000),
         &200,
         &f.due_ledger(),
         &String::from_str(&f.env, "X"),
@@ -438,7 +449,7 @@ fn create_rwa_token_failed_deadline_expired() {
             &f.precompute_token_address(&f.salt(1)),
             1,
             &f.factory_id,
-            10_000_000_000,
+            usdc_units(10_000),
             1,
             expired_deadline,
         ),
@@ -451,7 +462,7 @@ fn create_rwa_token_failed_invalid_signature() {
     let f = TestFixture::new();
     let res: TryVoid = f.factory().try_create_rwa_token(
         &f.shipper,
-        &10_000_000_000,
+        &usdc_units(10_000),
         &200,
         &f.due_ledger(),
         &String::from_str(&f.env, "X"),
@@ -467,7 +478,7 @@ fn create_rwa_token_failed_invalid_signature() {
             &f.factory_id,
             1,
             &f.factory_id,
-            10_000_000_000,
+            usdc_units(10_000),
             1,
             f.deadline(),
         ),
@@ -498,14 +509,161 @@ fn create_rwa_token_success() {
     assert_eq!(rwa.id, rwa_id);
 
     // Shipper USDC: paid the upfront (interest pool + protocol fee).
-    let upfront = 10_000_000_000 * (200 + PROTOCOL_FEE_BPS) / 10_000; // 250 USDC
+    let upfront = usdc_units(10_000) * (200 + PROTOCOL_FEE_BPS) / 10_000; // 250 USDC
     let shipper_usdc_current_balance = f.usdc_balance(&f.shipper);
-    let shipper_usdc_expected = 500_000_000_000 - upfront; // 500 - 250
+    let shipper_usdc_expected = usdc_units(500) - upfront; // 500 - 250
     assert_eq!(shipper_usdc_current_balance, shipper_usdc_expected);
 
     // RWA token: factory mints the full 10K raise to itself.
     let token = SEP57Client::new(&f.env, &rwa.token);
     let factory_id = f.factory_id.clone();
-    assert_eq!(token.balance(&factory_id), 10_000_000_000);
-    assert_eq!(token.total_supply(), 10_000_000_000);
+    assert_eq!(token.balance(&factory_id), usdc_units(10_000));
+    assert_eq!(token.total_supply(), usdc_units(10_000));
+}
+
+#[test]
+fn buy_shares_failed_not_initialized() {
+    let f = TestFixture::new();
+    let factory_id = f.env.register(Factory, ());
+    let factory = FactoryClient::new(&f.env, &factory_id);
+    let rwa_id = f.create_rwa(1);
+
+    let res: TryVoid = factory.try_buy_shares(&rwa_id, &f.investor, &usdc_units(100));
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+}
+
+#[test]
+fn buy_shares_failed_amount_not_positive() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    let res: TryVoid = f.factory().try_buy_shares(&rwa_id, &f.investor, &0);
+    assert_eq!(res, Err(Ok(Error::InvalidAmount.into())));
+}
+
+#[test]
+fn buy_shares_failed_role_not_kyc() {
+    let f = TestFixture::new();
+    let unverified = <soroban_sdk::Address as Address>::generate(&f.env);
+    let rwa_id = f.create_rwa(1);
+
+    let res: TryVoid = f
+        .factory()
+        .try_buy_shares(&rwa_id, &unverified, &usdc_units(100));
+    assert_eq!(res, Err(Ok(Error::NotVerified.into())));
+}
+
+#[test]
+fn buy_shares_failed_rwa_not_found() {
+    let f = TestFixture::new();
+    let res: TryVoid = f
+        .factory()
+        .try_buy_shares(&999, &f.investor, &usdc_units(100));
+    assert_eq!(res, Err(Ok(Error::RwaNotFound.into())));
+}
+
+#[test]
+fn buy_shares_failed_rwa_not_open() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    // Fund the offering: investor buys all available shares so status flips
+    // to Funded. Then a subsequent buy attempt must fail with RwaNotOpen.
+    let rwa = f.factory().get_rwa(&rwa_id);
+    let available = rwa.shares_available;
+    assert!(available > 0);
+    // Fund investor with enough USDC for the purchase plus a 100-USDC buffer.
+    f.usdc()
+        .transfer(&f.admin, &f.investor, &(available + usdc_units(100)));
+    f.approve_factory(&f.investor, available);
+    f.factory().buy_shares(&rwa_id, &f.investor, &available);
+    assert_eq!(f.factory().rwa_status(&rwa_id), RWAStatus::Funded);
+
+    let res: TryVoid = f
+        .factory()
+        .try_buy_shares(&rwa_id, &f.investor, &usdc_units(100));
+    assert_eq!(res, Err(Ok(Error::RwaNotOpen.into())));
+}
+
+#[test]
+fn buy_shares_failed_shares_exhausted() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    let rwa = f.factory().get_rwa(&rwa_id);
+    let available = rwa.shares_available;
+    assert!(available > 1, "test needs more than 1 share available");
+
+    // Investor A buys almost everything, leaving exactly 1 share. Status
+    // stays Open because shares_available > 0.
+    let a_buy = available - 1;
+    f.usdc()
+        .transfer(&f.admin, &f.investor, &(available + usdc_units(100)));
+    f.approve_factory(&f.investor, a_buy);
+    f.factory().buy_shares(&rwa_id, &f.investor, &a_buy);
+    assert_eq!(f.factory().rwa_status(&rwa_id), RWAStatus::Open);
+    assert_eq!(f.factory().get_rwa(&rwa_id).shares_available, 1);
+
+    // Investor B tries to buy 2 shares but only 1 remains. Must fail with
+    // SharesExhausted, not RwaNotOpen (the offering is still open).
+    let b = <soroban_sdk::Address as Address>::generate(&f.env);
+    // Register B as a verified KYC investor so we get past the role gate.
+    f.identity().set_identity(
+        &b,
+        &true,
+        &String::from_str(&f.env, "US"),
+        &IdentityRole::KYC,
+        &f.admin,
+    );
+    f.usdc()
+        .transfer(&f.admin, &b, &(usdc_units(2) + usdc_units(100)));
+    f.approve_factory(&b, usdc_units(2));
+
+    let res: TryVoid = f.factory().try_buy_shares(&rwa_id, &b, &usdc_units(2));
+    assert_eq!(res, Err(Ok(Error::SharesExhausted.into())));
+}
+
+#[test]
+fn buy_shares_success() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    let rwa = f.factory().get_rwa(&rwa_id);
+    let available = rwa.shares_available;
+    assert!(available > 0);
+
+    // Pre-state: factory holds the entire raise_amount of RWA tokens
+    // (minted at create_rwa time). `upfront` of those are conceptually
+    // reserved as the interest + protocol fee pool; the rest is for sale.
+    // Investor starts with 0 RWA + 0 USDC.
+    let token = SEP57Client::new(&f.env, &rwa.token);
+    let factory_addr = f.factory_id.clone();
+    let investor = f.investor.clone();
+    let upfront = rwa.raise_amount - available; // shares_reserved at create time
+    assert_eq!(token.balance(&factory_addr), rwa.raise_amount);
+    assert_eq!(token.balance(&investor), 0);
+    assert_eq!(f.usdc_balance(&factory_addr), upfront);
+    assert_eq!(f.usdc_balance(&investor), 0);
+
+    // Fund investor with enough USDC for the purchase plus a 100-USDC buffer.
+    f.usdc()
+        .transfer(&f.admin, &f.investor, &(available + usdc_units(100)));
+    f.approve_factory(&f.investor, available);
+
+    // Execute the buy.
+    let before = f.factory().get_rwa(&rwa_id).shares_available;
+    f.factory().buy_shares(&rwa_id, &f.investor, &available);
+    let after = f.factory().get_rwa(&rwa_id).shares_available;
+    assert_eq!(after, before - available);
+    assert_eq!(f.factory().rwa_status(&rwa_id), RWAStatus::Funded);
+
+    // Post-state: `available` shares moved factory → investor. Factory
+    // keeps the `upfront` tokens (interest pool + protocol fee backing).
+    assert_eq!(token.balance(&factory_addr), upfront);
+    assert_eq!(token.balance(&investor), available);
+
+    // USDC moved investor → factory 1:1 with the buy. Investor keeps the
+    // 100-USDC buffer they were given.
+    assert_eq!(f.usdc_balance(&factory_addr), upfront + available);
+    assert_eq!(f.usdc_balance(&investor), usdc_units(100));
 }

@@ -174,8 +174,8 @@ impl FactoryInterface for Factory {
     }
 
     fn buy_shares(env: Env, rwa_id: u64, investor: Address, amount: i128) {
-        require_initialized(&env);
         investor.require_auth();
+        require_initialized(&env);
         require_positive(&env, amount);
 
         // KYC verification: investor must be a verified retail investor.
