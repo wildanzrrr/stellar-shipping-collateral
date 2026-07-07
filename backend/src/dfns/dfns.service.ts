@@ -11,19 +11,24 @@ export class DfnsService implements OnModuleInit {
   constructor(private readonly config: ConfigService) {}
 
   onModuleInit() {
-    const baseUrl = this.config.getOrThrow<string>('DFNS_API_URL');
-    const authToken = this.config.getOrThrow<string>(
-      'DFNS_SERVICE_ACCOUNT_TOKEN',
-    );
-    const credId = this.config.getOrThrow<string>(
-      'DFNS_SERVICE_ACCOUNT_CRED_ID',
-    );
-    const pemPath = this.config.get<string>('DFNS_SERVICE_ACCOUNT_PEM_PATH');
+    try {
+      const baseUrl = this.config.getOrThrow<string>('DFNS_API_URL');
+      const authToken = this.config.getOrThrow<string>(
+        'DFNS_SERVICE_ACCOUNT_TOKEN',
+      );
+      const credId = this.config.getOrThrow<string>(
+        'DFNS_SERVICE_ACCOUNT_CRED_ID',
+      );
+      const pemPath = this.config.get<string>('DFNS_SERVICE_ACCOUNT_PEM_PATH');
 
-    const signer = makeSigner(credId, pemPath);
+      const signer = makeSigner(credId, pemPath);
 
-    this.client = new DfnsApiClient({ baseUrl, authToken, signer });
-    this.logger.log(`DfnsApiClient initialised → ${baseUrl}`);
+      this.client = new DfnsApiClient({ baseUrl, authToken, signer });
+      this.logger.log(`DfnsApiClient initialised → ${baseUrl}`);
+    } catch (error) {
+      this.logger.error('Error initialising DfnsApiClient', error);
+      throw error;
+    }
   }
 
   /** Service-account-scoped DFNS client (full perms on the org's behalf). */

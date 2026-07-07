@@ -1,0 +1,67 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String        @id @default(cuid())
+  username      String        @unique
+  dfnsUserId    String?       @unique
+  userAuthToken String?
+  wallet        Wallet?
+  signSession   SignSession[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([username])
+  @@index([dfnsUserId])
+}
+
+model Wallet {
+  id           String        @id @default(cuid())
+  dfnsWalletId String        @unique
+  address      String        @unique
+  network      String
+  name         String
+  signingKeyId String?
+  user         User          @relation(fields: [userId], references: [id])
+  userId       String        @unique
+  signSessions SignSession[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([address])
+  @@index([dfnsWalletId])
+  @@index([userId])
+}
+
+model SignSession {
+  id             String  @id @default(cuid())
+  message        String
+  transactionXdr String
+  status         String  @default("initiated")
+  signedXdr      String?
+  wallet         Wallet  @relation(fields: [walletId], references: [id])
+  walletId       String
+  user           User    @relation(fields: [userId], references: [id])
+  userId         String
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([walletId])
+  @@index([userId])
+  @@index([status])
+}

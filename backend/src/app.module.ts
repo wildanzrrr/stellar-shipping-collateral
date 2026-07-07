@@ -2,17 +2,22 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { PrismaModule } from './prisma.module';
 import { DfnsModule } from './dfns/dfns.module';
-import { UsersController } from './users/users.controller';
-import { UsersService } from './users/users.service';
-import { WalletsController } from './wallets/wallets.controller';
+import { UsersModule } from './users/users.module';
+import { WalletsModule } from './wallets/wallets.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env'] }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+    }),
+    PrismaModule,
     DfnsModule,
+    UsersModule,
+    WalletsModule,
   ],
-  controllers: [AppController, UsersController, WalletsController],
-  providers: [AppService, UsersService],
+  controllers: [AppController],
+  providers: [AppService],
 })
 export class AppModule {}
