@@ -1,6 +1,6 @@
 use soroban_sdk::{contracttrait, Address, BytesN, Env, String, Vec};
 
-use crate::types::{RWAStatus, RWAView};
+use crate::types::{RWAStatus, RWA};
 
 #[contracttrait]
 pub trait FactoryInterface {
@@ -20,6 +20,7 @@ pub trait FactoryInterface {
     fn create_rwa_token(
         env: Env,
         shipper: Address,
+        token_id: String,
         raise_amount: i128,
         interest_bps: i128,
         due_ledger: u32,
@@ -31,16 +32,16 @@ pub trait FactoryInterface {
         mint_signature: BytesN<64>,
     );
 
-    fn settle_debt(env: Env, rwa_id: u64, shipper: Address, principal_amount: i128);
+    fn settle_debt(env: Env, rwa_id: String, shipper: Address, principal_amount: i128);
 
-    fn collect_fund(env: Env, rwa_id: u64, shipper: Address);
+    fn collect_fund(env: Env, rwa_id: String, shipper: Address);
 
     // ---- investor lifecycle ----
-    fn buy_shares(env: Env, rwa_id: u64, investor: Address, amount: i128);
+    fn buy_shares(env: Env, rwa_id: String, investor: Address, amount: i128);
 
     fn claim(
         env: Env,
-        rwa_id: u64,
+        rwa_id: String,
         investor: Address,
         amount: i128,
         nonce: u64,
@@ -49,14 +50,14 @@ pub trait FactoryInterface {
     );
 
     // ---- protocol admin ----
-    fn withdraw_fees(env: Env, rwa_id: u64, admin: Address);
+    fn withdraw_fees(env: Env, rwa_id: String, admin: Address);
 
     // ---- views ----
-    fn get_rwa(env: Env, rwa_id: u64) -> RWAView;
-    fn list_rwas(env: Env) -> Vec<RWAView>;
-    fn shares_bought(env: Env, rwa_id: u64) -> i128;
-    fn investor_shares(env: Env, rwa_id: u64, investor: Address) -> i128;
-    fn rwa_status(env: Env, rwa_id: u64) -> RWAStatus;
+    fn get_rwa(env: Env, rwa_id: String) -> RWA;
+    fn list_rwas(env: Env) -> Vec<RWA>;
+    fn shares_bought(env: Env, rwa_id: String) -> i128;
+    fn investor_shares(env: Env, rwa_id: String, investor: Address) -> i128;
+    fn rwa_status(env: Env, rwa_id: String) -> RWAStatus;
     fn usdc(env: Env) -> Address;
     fn identity_verifier(env: Env) -> Address;
     fn compliance(env: Env) -> Address;

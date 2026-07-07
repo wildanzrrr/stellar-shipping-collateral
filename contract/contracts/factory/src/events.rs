@@ -1,4 +1,4 @@
-use soroban_sdk::{contractevent, Address};
+use soroban_sdk::{contractevent, Address, String};
 
 #[contractevent]
 pub struct Initialized {
@@ -12,7 +12,7 @@ pub struct Initialized {
 #[contractevent]
 pub struct RWACreated {
     #[topic]
-    pub rwa_id: u64,
+    pub rwa_id: String,
     #[topic]
     pub shipper: Address,
     #[topic]
@@ -25,7 +25,7 @@ pub struct RWACreated {
 #[contractevent]
 pub struct SharesBought {
     #[topic]
-    pub rwa_id: u64,
+    pub rwa_id: String,
     #[topic]
     pub investor: Address,
     pub amount: i128,
@@ -34,7 +34,7 @@ pub struct SharesBought {
 #[contractevent]
 pub struct DebtSettled {
     #[topic]
-    pub rwa_id: u64,
+    pub rwa_id: String,
     #[topic]
     pub shipper: Address,
     pub amount: i128,
@@ -43,7 +43,7 @@ pub struct DebtSettled {
 #[contractevent]
 pub struct Claimed {
     #[topic]
-    pub rwa_id: u64,
+    pub rwa_id: String,
     #[topic]
     pub investor: Address,
     pub principal: i128,
@@ -53,7 +53,7 @@ pub struct Claimed {
 #[contractevent]
 pub struct FeesWithdrawn {
     #[topic]
-    pub rwa_id: u64,
+    pub rwa_id: String,
     #[topic]
     pub admin: Address,
     pub amount: i128,

@@ -214,7 +214,7 @@ impl TestFixture {
     }
 
     /// Create a 10K USDC raise at 2% interest. Returns the RWA id.
-    fn create_rwa(&self, salt_n: u8) -> u64 {
+    fn create_rwa(&self, salt_n: u8) -> String {
         let raise_amount: i128 = usdc_units(10_000); // 10K USDC @ 7 decimals
         let interest_bps: i128 = 200; // 2%
         let upfront = raise_amount * (interest_bps + PROTOCOL_FEE_BPS) / 10_000; // 250 USDC
@@ -241,9 +241,11 @@ impl TestFixture {
             deadline,
         );
 
+        let token_id = String::from_str(&self.env, alloc::format!("RWA-{}", salt_n).as_str());
         let before = self.factory().list_rwas().len();
         self.factory().create_rwa_token(
             &self.shipper,
+            &token_id,
             &raise_amount,
             &interest_bps,
             &self.due_ledger(),
@@ -303,6 +305,7 @@ fn create_rwa_token_failed_contract_not_initialized() {
 
     let res: TryVoid = factory.try_create_rwa_token(
         &f.shipper,
+        &String::from_str(&f.env, "TKN-1"),
         &usdc_units(10_000),
         &200,
         &f.due_ledger(),
@@ -328,6 +331,7 @@ fn create_rwa_token_failed_raise_amount_not_positive() {
     let f = TestFixture::new();
     let res: TryVoid = f.factory().try_create_rwa_token(
         &f.shipper,
+        &String::from_str(&f.env, "TKN-1"),
         &0,
         &200,
         &f.due_ledger(),
@@ -355,6 +359,7 @@ fn create_rwa_token_failed_bps_negative() {
     let due = f.env.ledger().sequence() - 1; // expired
     let res: TryVoid = f.factory().try_create_rwa_token(
         &f.shipper,
+        &String::from_str(&f.env, "TKN-1"),
         &usdc_units(10_000),
         &-1,
         &due, // expired
@@ -380,6 +385,7 @@ fn create_rwa_token_failed_bps_above_cap() {
     let f = TestFixture::new();
     let res: TryVoid = f.factory().try_create_rwa_token(
         &f.shipper,
+        &String::from_str(&f.env, "TKN-1"),
         &usdc_units(10_000),
         &10_001,
         &f.due_ledger(),
@@ -410,6 +416,7 @@ fn create_rwa_token_failed_role_not_kyb() {
 
     let res: TryVoid = f.factory().try_create_rwa_token(
         &unverified,
+        &String::from_str(&f.env, "TKN-1"),
         &usdc_units(10_000),
         &200,
         &f.due_ledger(),
@@ -437,6 +444,7 @@ fn create_rwa_token_failed_deadline_expired() {
     let expired_deadline = f.env.ledger().sequence() - 1; // expired
     let res: TryVoid = f.factory().try_create_rwa_token(
         &f.shipper,
+        &String::from_str(&f.env, "TKN-1"),
         &usdc_units(10_000),
         &200,
         &f.due_ledger(),
@@ -458,10 +466,41 @@ fn create_rwa_token_failed_deadline_expired() {
 }
 
 #[test]
+fn create_rwa_token_failed_rwa_already_exists() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    // Attempt to create a second RWA with the same token_id (which is used
+    // as the RWA id). Must fail with RwaAlreadyExists.
+    let res: TryVoid = f.factory().try_create_rwa_token(
+        &f.shipper,
+        &rwa_id,
+        &usdc_units(10_000),
+        &200,
+        &f.due_ledger(),
+        &String::from_str(&f.env, "X"),
+        &String::from_str(&f.env, "X"),
+        &f.salt(2),
+        &1,
+        &f.deadline(),
+        &f.signature(
+            &f.precompute_token_address(&f.salt(2)),
+            1,
+            &f.factory_id,
+            usdc_units(10_000),
+            1,
+            f.deadline(),
+        ),
+    );
+    assert_eq!(res, Err(Ok(Error::RwaAlreadyExists.into())));
+}
+
+#[test]
 fn create_rwa_token_failed_invalid_signature() {
     let f = TestFixture::new();
     let res: TryVoid = f.factory().try_create_rwa_token(
         &f.shipper,
+        &String::from_str(&f.env, "TKN-1"),
         &usdc_units(10_000),
         &200,
         &f.due_ledger(),
@@ -522,7 +561,7 @@ fn create_rwa_token_success() {
     assert_eq!(token.balance(&factory_id), usdc_units(10_000));
     assert_eq!(token.total_supply(), usdc_units(10_000));
     assert_eq!(rwa.shares_reserved, 0);
-    assert_eq!(rwa.shares_available, rwa.raise_amount);
+    assert_eq!(rwa.shares_available(), rwa.raise_amount);
 }
 
 #[test]
@@ -560,9 +599,11 @@ fn buy_shares_failed_role_not_kyc() {
 #[test]
 fn buy_shares_failed_rwa_not_found() {
     let f = TestFixture::new();
-    let res: TryVoid = f
-        .factory()
-        .try_buy_shares(&999, &f.investor, &usdc_units(100));
+    let res: TryVoid = f.factory().try_buy_shares(
+        &String::from_str(&f.env, "nonexistent"),
+        &f.investor,
+        &usdc_units(100),
+    );
     assert_eq!(res, Err(Ok(Error::RwaNotFound.into())));
 }
 
@@ -574,7 +615,7 @@ fn buy_shares_failed_rwa_not_open() {
     // Fund the offering: investor buys all available shares so status flips
     // to Funded. Then a subsequent buy attempt must fail with RwaNotOpen.
     let rwa = f.factory().get_rwa(&rwa_id);
-    let available = rwa.shares_available;
+    let available = rwa.shares_available();
     assert!(available > 0);
     // Fund investor with enough USDC for the purchase plus a 100-USDC buffer.
     f.usdc()
@@ -595,7 +636,7 @@ fn buy_shares_failed_shares_exhausted() {
     let rwa_id = f.create_rwa(1);
 
     let rwa = f.factory().get_rwa(&rwa_id);
-    let available = rwa.shares_available;
+    let available = rwa.shares_available();
     assert!(available > 1, "test needs more than 1 share available");
 
     // Investor A buys almost everything, leaving exactly 1 share. Status
@@ -606,7 +647,7 @@ fn buy_shares_failed_shares_exhausted() {
     f.approve_factory(&f.investor, a_buy);
     f.factory().buy_shares(&rwa_id, &f.investor, &a_buy);
     assert_eq!(f.factory().rwa_status(&rwa_id), RWAStatus::Open);
-    assert_eq!(f.factory().get_rwa(&rwa_id).shares_available, 1);
+    assert_eq!(f.factory().get_rwa(&rwa_id).shares_available(), 1);
 
     // Investor B tries to buy 2 shares but only 1 remains. Must fail with
     // SharesExhausted, not RwaNotOpen (the offering is still open).
@@ -633,7 +674,7 @@ fn buy_shares_success() {
     let rwa_id = f.create_rwa(1);
 
     let rwa = f.factory().get_rwa(&rwa_id);
-    let available = rwa.shares_available;
+    let available = rwa.shares_available();
     assert!(available > 0);
 
     // Pre-state: factory holds the entire raise_amount of RWA tokens
@@ -655,10 +696,10 @@ fn buy_shares_success() {
     f.approve_factory(&f.investor, rwa.raise_amount);
 
     // Execute the buy.
-    let before = f.factory().get_rwa(&rwa_id).shares_available;
+    let before = f.factory().get_rwa(&rwa_id).shares_available();
     f.factory()
         .buy_shares(&rwa_id, &f.investor, &rwa.raise_amount);
-    let after = f.factory().get_rwa(&rwa_id).shares_available;
+    let after = f.factory().get_rwa(&rwa_id).shares_available();
     assert_eq!(after, before - rwa.raise_amount);
     assert_eq!(f.factory().rwa_status(&rwa_id), RWAStatus::Funded);
 
@@ -695,7 +736,7 @@ fn buy_shares_full_sell_through_drains_factory() {
     assert_eq!(f.factory().rwa_status(&rwa_id), RWAStatus::Funded);
     assert_eq!(token.balance(&factory_addr), 0);
     assert_eq!(token.balance(&f.investor), rwa.raise_amount);
-    assert_eq!(f.factory().get_rwa(&rwa_id).shares_available, 0);
+    assert_eq!(f.factory().get_rwa(&rwa_id).shares_available(), 0);
     assert_eq!(f.factory().get_rwa(&rwa_id).shares_reserved, 0);
 }
 

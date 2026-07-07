@@ -1,7 +1,7 @@
-use soroban_sdk::{panic_with_error, Address, BytesN, Env, Map};
+use soroban_sdk::{panic_with_error, Address, BytesN, Env, Map, String};
 
 use crate::errors::Error;
-use crate::types::{DataKey, RWAOffering};
+use crate::types::{DataKey, RWA};
 
 // ---- init + admin ----
 
@@ -99,45 +99,33 @@ pub fn sep57_wasm_hash(env: &Env) -> BytesN<32> {
         .unwrap()
 }
 
-// ---- RWA id counter ----
-
-pub fn next_rwa_id(env: &Env) -> u64 {
-    let id: u64 = env
-        .storage()
-        .instance()
-        .get(&DataKey::NextRwaId)
-        .unwrap_or(1);
-    env.storage().instance().set(&DataKey::NextRwaId, &(id + 1));
-    id
-}
-
 // ---- RWA offering map (load-mutate-save, like identity-verifier Users) ----
 
-pub fn load_rwas(env: &Env) -> Map<u64, RWAOffering> {
+pub fn load_rwas(env: &Env) -> Map<String, RWA> {
     env.storage()
         .instance()
         .get(&DataKey::RWAs)
         .unwrap_or_else(|| Map::new(env))
 }
 
-pub fn save_rwas(env: &Env, rwas: &Map<u64, RWAOffering>) {
+pub fn save_rwas(env: &Env, rwas: &Map<String, RWA>) {
     env.storage().instance().set(&DataKey::RWAs, rwas);
 }
 
-pub fn get_rwa(env: &Env, id: u64) -> RWAOffering {
+pub fn get_rwa(env: &Env, id: &String) -> RWA {
     load_rwas(env)
-        .get(id)
+        .get(id.clone())
         .unwrap_or_else(|| panic_with_error!(env, Error::RwaNotFound))
 }
 
-pub fn set_rwa(env: &Env, offering: &RWAOffering) {
+pub fn set_rwa(env: &Env, offering: &RWA) {
     let mut rwas = load_rwas(env);
-    rwas.set(offering.id, offering.clone());
+    rwas.set(offering.id.clone(), offering.clone());
     save_rwas(env, &rwas);
 }
 
-pub fn set_rwa_id_by_token(env: &Env, token: &Address, id: u64) {
+pub fn set_rwa_id_by_token(env: &Env, token: &Address, id: &String) {
     env.storage()
         .instance()
-        .set(&DataKey::RWAByToken(token.clone()), &id);
+        .set(&DataKey::RWAByToken(token.clone()), id);
 }

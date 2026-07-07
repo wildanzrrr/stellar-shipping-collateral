@@ -19,7 +19,7 @@ pub use crate::errors::Error;
 use crate::events::{Claimed, DebtSettled, FeesWithdrawn, Initialized, RWACreated, SharesBought};
 use crate::external::{ComplianceClient, IdentityRole, IdentityVerifierClient, Sep57Client};
 use crate::interface::FactoryInterface;
-use crate::types::{RWAOffering, RWAStatus, RWAView};
+use crate::types::{RWAStatus, RWA};
 
 // BPS bounds — interest chosen by shipper, capped at 9.5% (950 bps).
 const MAX_INTEREST_BPS: i128 = 950;
@@ -70,6 +70,7 @@ impl FactoryInterface for Factory {
     fn create_rwa_token(
         env: Env,
         shipper: Address,
+        token_id: String,
         raise_amount: i128,
         interest_bps: i128,
         due_ledger: u32,
@@ -91,6 +92,13 @@ impl FactoryInterface for Factory {
         // factory error, not a generic panic from the sep57 token contract.
         if deadline < env.ledger().sequence() {
             panic_with_error!(env, Error::InvalidDeadline);
+        }
+
+        // Reject duplicate token_ids so the factory's id → offering map stays
+        // a one-to-one. Off-chain indexers rely on this id to look up the
+        // offering; a collision would silently shadow an existing record.
+        if storage::load_rwas(&env).contains_key(token_id.clone()) {
+            panic_with_error!(env, Error::RwaAlreadyExists);
         }
 
         let proto_bps = storage::protocol_fee_bps(&env);
@@ -140,18 +148,19 @@ impl FactoryInterface for Factory {
             &mint_signature,
         );
 
-        // Register the offering. The factory sells 100% of the raise to
-        // investors; the upfront interest + protocol fee are paid in USDC,
-        // not by reserving RWA tokens. `shares_reserved` is kept at 0 for
-        // storage-layout compatibility with older RWAs (it's read-only
-        // accounting and no longer participates in `shares_available`).
-        let id = storage::next_rwa_id(&env);
-        let offering = RWAOffering {
-            id,
+        // Register the offering under the caller-supplied token_id. The
+        // factory sells 100% of the raise to investors; the upfront
+        // interest + protocol fee are paid in USDC, not by reserving RWA
+        // tokens. `shares_reserved` is kept at 0 for storage-layout
+        // compatibility with older RWAs (it's read-only accounting and no
+        // longer participates in `shares_available`).
+        let offering = RWA {
+            id: token_id.clone(),
             token: token_addr.clone(),
             shipper: shipper.clone(),
             raise_amount,
             interest_bps,
+            protocol_fee_bps: proto_bps,
             interest_pool: interest_fee,
             protocol_fee_pool: protocol_fee,
             principal_pool: 0,
@@ -163,10 +172,10 @@ impl FactoryInterface for Factory {
             status: RWAStatus::Open,
         };
         storage::set_rwa(&env, &offering);
-        storage::set_rwa_id_by_token(&env, &token_addr, id);
+        storage::set_rwa_id_by_token(&env, &token_addr, &token_id);
 
         RWACreated {
-            rwa_id: id,
+            rwa_id: token_id,
             shipper,
             token: token_addr,
             raise_amount,
@@ -176,7 +185,7 @@ impl FactoryInterface for Factory {
         .publish(&env);
     }
 
-    fn buy_shares(env: Env, rwa_id: u64, investor: Address, amount: i128) {
+    fn buy_shares(env: Env, rwa_id: String, investor: Address, amount: i128) {
         investor.require_auth();
         require_initialized(&env);
         require_positive(&env, amount);
@@ -184,7 +193,7 @@ impl FactoryInterface for Factory {
         // KYC verification: investor must be a verified retail investor.
         require_role(&env, &investor, IdentityRole::KYC);
 
-        let mut offering = storage::get_rwa(&env, rwa_id);
+        let mut offering = storage::get_rwa(&env, &rwa_id);
         if offering.status != RWAStatus::Open {
             panic_with_error!(env, Error::RwaNotOpen);
         }
@@ -219,11 +228,11 @@ impl FactoryInterface for Factory {
         .publish(&env);
     }
 
-    fn collect_fund(env: Env, rwa_id: u64, shipper: Address) {
+    fn collect_fund(env: Env, rwa_id: String, shipper: Address) {
         require_initialized(&env);
         shipper.require_auth();
 
-        let offering = storage::get_rwa(&env, rwa_id);
+        let offering = storage::get_rwa(&env, &rwa_id);
         if offering.shipper != shipper {
             panic_with_error!(env, Error::Unauthorized);
         }
@@ -241,12 +250,12 @@ impl FactoryInterface for Factory {
         );
     }
 
-    fn settle_debt(env: Env, rwa_id: u64, shipper: Address, principal_amount: i128) {
+    fn settle_debt(env: Env, rwa_id: String, shipper: Address, principal_amount: i128) {
         require_initialized(&env);
         shipper.require_auth();
         require_positive(&env, principal_amount);
 
-        let mut offering = storage::get_rwa(&env, rwa_id);
+        let mut offering = storage::get_rwa(&env, &rwa_id);
         if offering.shipper != shipper {
             panic_with_error!(env, Error::Unauthorized);
         }
@@ -273,7 +282,7 @@ impl FactoryInterface for Factory {
 
     fn claim(
         env: Env,
-        rwa_id: u64,
+        rwa_id: String,
         investor: Address,
         amount: i128,
         nonce: u64,
@@ -284,7 +293,7 @@ impl FactoryInterface for Factory {
         investor.require_auth();
         require_positive(&env, amount);
 
-        let mut offering = storage::get_rwa(&env, rwa_id);
+        let mut offering = storage::get_rwa(&env, &rwa_id);
         if offering.status != RWAStatus::Settled {
             panic_with_error!(env, Error::RwaNotSettled);
         }
@@ -345,12 +354,12 @@ impl FactoryInterface for Factory {
         .publish(&env);
     }
 
-    fn withdraw_fees(env: Env, rwa_id: u64, admin: Address) {
+    fn withdraw_fees(env: Env, rwa_id: String, admin: Address) {
         require_initialized(&env);
         admin.require_auth();
         storage::require_admin(&env, &admin);
 
-        let mut offering = storage::get_rwa(&env, rwa_id);
+        let mut offering = storage::get_rwa(&env, &rwa_id);
         if offering.protocol_fee_pool <= 0 {
             panic_with_error!(env, Error::InsufficientPool);
         }
@@ -374,38 +383,37 @@ impl FactoryInterface for Factory {
 
     // ---- views ----
 
-    fn get_rwa(env: Env, rwa_id: u64) -> RWAView {
+    fn get_rwa(env: Env, rwa_id: String) -> RWA {
         require_initialized(&env);
-        storage::get_rwa(&env, rwa_id).into_view(storage::protocol_fee_bps(&env))
+        storage::get_rwa(&env, &rwa_id)
     }
 
-    fn list_rwas(env: Env) -> Vec<RWAView> {
+    fn list_rwas(env: Env) -> Vec<RWA> {
         require_initialized(&env);
-        let proto_bps = storage::protocol_fee_bps(&env);
         let rwas = storage::load_rwas(&env);
-        let mut out: Vec<RWAView> = Vec::new(&env);
+        let mut out: Vec<RWA> = Vec::new(&env);
         rwas.iter().for_each(|(_, o)| {
-            out.push_back(o.into_view(proto_bps));
+            out.push_back(o);
         });
         out
     }
 
-    fn shares_bought(env: Env, rwa_id: u64) -> i128 {
+    fn shares_bought(env: Env, rwa_id: String) -> i128 {
         require_initialized(&env);
-        storage::get_rwa(&env, rwa_id).shares_bought
+        storage::get_rwa(&env, &rwa_id).shares_bought
     }
 
-    fn investor_shares(env: Env, rwa_id: u64, investor: Address) -> i128 {
+    fn investor_shares(env: Env, rwa_id: String, investor: Address) -> i128 {
         require_initialized(&env);
-        storage::get_rwa(&env, rwa_id)
+        storage::get_rwa(&env, &rwa_id)
             .investors
             .get(investor)
             .unwrap_or(0)
     }
 
-    fn rwa_status(env: Env, rwa_id: u64) -> RWAStatus {
+    fn rwa_status(env: Env, rwa_id: String) -> RWAStatus {
         require_initialized(&env);
-        storage::get_rwa(&env, rwa_id).status
+        storage::get_rwa(&env, &rwa_id).status
     }
 
     fn usdc(env: Env) -> Address {
@@ -495,7 +503,7 @@ fn checked_add(env: &Env, left: i128, right: i128) -> i128 {
         .unwrap_or_else(|| panic_with_error!(env, Error::ArithmeticOverflow))
 }
 
-fn next_status(env: &Env, offering: &RWAOffering) -> RWAStatus {
+fn next_status(env: &Env, offering: &RWA) -> RWAStatus {
     if offering.shares_available() <= 0 {
         let _ = env.ledger().sequence();
         RWAStatus::Funded
