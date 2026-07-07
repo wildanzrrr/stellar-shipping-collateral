@@ -581,7 +581,6 @@ fn mint_failed_because_contract_not_initialized() {
     let token_id = env.register(SEP57, ());
     let token_client = SEP57Client::new(&env, &token_id);
     let admin_key = SigningKey::from_bytes(&[7; 32]);
-    let admin_signer = BytesN::from_array(&env, admin_key.verifying_key().as_bytes());
     let alice = <soroban_sdk::Address as Address>::generate(&env);
 
     IdentityVerifierClient::new(&env, &identity_id).initialize(&admin);

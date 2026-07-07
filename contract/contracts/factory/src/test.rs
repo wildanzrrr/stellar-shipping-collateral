@@ -1,6 +1,7 @@
 #![cfg(test)]
 
 extern crate alloc;
+extern crate std;
 
 use super::*;
 use alloc::vec;
@@ -1686,4 +1687,150 @@ fn withdraw_fees_failed_no_fees() {
     // A second attempt finds nothing to withdraw.
     let res: TryVoid = f.factory().try_withdraw_fees(&rwa_id, &f.admin);
     assert_eq!(res, Err(Ok(Error::InsufficientPool.into())));
+}
+
+// =====================================================================
+// view coverage
+// =====================================================================
+//
+// `shares_bought` and `investor_shares` mirror the RWA's accounting so
+// off-chain indexers can read state without rehydrating the full
+// struct. They share the same authorization path as the rest of the
+// contract (init-gated), so the not-initialized cases use the same
+// `Error::Unauthorized` surface.
+
+#[test]
+fn shares_bought_tracks_investor_purchases() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    // Zero investors so far — fresh RWA.
+    assert_eq!(f.factory().shares_bought(&rwa_id), 0);
+
+    // Two investors buy different amounts. shares_bought must equal the
+    // sum of both.
+    let rwa = f.factory().get_rwa(&rwa_id);
+    let first = usdc_units(2_000);
+    let second = usdc_units(3_500);
+
+    f.usdc()
+        .transfer(&f.admin, &f.investor, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&f.investor, first + second);
+    f.factory().buy_shares(&rwa_id, &f.investor, &first);
+    assert_eq!(f.factory().shares_bought(&rwa_id), first);
+
+    // A second investor buys a different amount.
+    let other = <soroban_sdk::Address as Address>::generate(&f.env);
+    f.identity().set_identity(
+        &other,
+        &true,
+        &String::from_str(&f.env, "US"),
+        &IdentityRole::KYC,
+        &f.admin,
+    );
+    f.usdc()
+        .transfer(&f.admin, &other, &(second + usdc_units(100)));
+    f.approve_factory(&other, second);
+    f.factory().buy_shares(&rwa_id, &other, &second);
+
+    assert_eq!(f.factory().shares_bought(&rwa_id), first + second);
+}
+
+#[test]
+fn shares_bought_failed_not_initialized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let factory_id = env.register(Factory, ());
+    let rwa_id = String::from_str(&env, "RWA-1");
+
+    let res: Result<Result<i128, soroban_sdk::Error>, Result<soroban_sdk::Error, InvokeError>> =
+        FactoryClient::new(&env, &factory_id).try_shares_bought(&rwa_id);
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+}
+
+#[test]
+fn investor_shares_per_address_breakdown() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    // No shares yet — both reads default to 0.
+    assert_eq!(f.factory().investor_shares(&rwa_id, &f.investor), 0);
+
+    let rwa = f.factory().get_rwa(&rwa_id);
+    let bought = usdc_units(4_000);
+    f.usdc()
+        .transfer(&f.admin, &f.investor, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&f.investor, bought);
+    f.factory().buy_shares(&rwa_id, &f.investor, &bought);
+
+    // The investor's allocation matches the single buy.
+    assert_eq!(f.factory().investor_shares(&rwa_id, &f.investor), bought);
+    // A never-seen address still resolves cleanly to 0 (no error).
+    let other = <soroban_sdk::Address as Address>::generate(&f.env);
+    assert_eq!(f.factory().investor_shares(&rwa_id, &other), 0);
+}
+
+#[test]
+fn investor_shares_failed_not_initialized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let factory_id = env.register(Factory, ());
+    let rwa_id = String::from_str(&env, "RWA-1");
+    let investor = <soroban_sdk::Address as Address>::generate(&env);
+
+    let res: Result<Result<i128, soroban_sdk::Error>, Result<soroban_sdk::Error, InvokeError>> =
+        FactoryClient::new(&env, &factory_id).try_investor_shares(&rwa_id, &investor);
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+}
+
+// =====================================================================
+// defensive panic paths
+// =====================================================================
+//
+// `require_bps` and `require_future_ledger` are private validation
+// helpers. Their success paths are exercised indirectly through the
+// public API; their panic paths are reachable only by feeding values
+// past the gate. `checked_add` has the same shape: the `Some` arm runs
+// on every public call, but the `None` (overflow) arm is defensive
+// code that's effectively unreachable through the bounded token mock.
+// We exercise all three directly to keep function coverage at 100%.
+
+#[test]
+fn require_bps_panics_above_cap() {
+    let env = Env::default();
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| require_bps(&env, 10_001)));
+    assert!(res.is_err());
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| require_bps(&env, -1)));
+    assert!(res.is_err());
+}
+
+#[test]
+fn require_future_ledger_panics_when_past() {
+    let env = Env::default();
+    env.ledger().set_sequence_number(100);
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        require_future_ledger(&env, 100)
+    }));
+    assert!(res.is_err());
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        require_future_ledger(&env, 50)
+    }));
+    assert!(res.is_err());
+}
+
+#[test]
+fn checked_add_panics_on_overflow() {
+    let env = Env::default();
+    // i128::MAX + 1 overflows; the helper panics with ArithmeticOverflow.
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        checked_add(&env, i128::MAX, 1)
+    }));
+    assert!(res.is_err());
+    // Negative overflow path: i128::MIN + (-1).
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        checked_add(&env, i128::MIN, -1)
+    }));
+    assert!(res.is_err());
+    // Sanity: ordinary addition still works.
+    assert_eq!(checked_add(&env, 5, 7), 12);
 }
