@@ -32,6 +32,15 @@ pub struct SharesBought {
 }
 
 #[contractevent]
+pub struct FundCollected {
+    #[topic]
+    pub rwa_id: String,
+    #[topic]
+    pub shipper: Address,
+    pub amount: i128,
+}
+
+#[contractevent]
 pub struct DebtSettled {
     #[topic]
     pub rwa_id: String,
@@ -54,6 +63,15 @@ pub struct Claimed {
 pub struct FeesWithdrawn {
     #[topic]
     pub rwa_id: String,
+    #[topic]
+    pub admin: Address,
+    pub amount: i128,
+}
+
+#[contractevent]
+pub struct EmergencyWithdrawn {
+    #[topic]
+    pub token: Address,
     #[topic]
     pub admin: Address,
     pub amount: i128,

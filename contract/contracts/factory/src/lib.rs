@@ -16,7 +16,10 @@ mod types;
 mod test;
 
 pub use crate::errors::Error;
-use crate::events::{Claimed, DebtSettled, FeesWithdrawn, Initialized, RWACreated, SharesBought};
+use crate::events::{
+    Claimed, DebtSettled, EmergencyWithdrawn, FeesWithdrawn, FundCollected, Initialized,
+    RWACreated, SharesBought,
+};
 use crate::external::{ComplianceClient, IdentityRole, IdentityVerifierClient, Sep57Client};
 use crate::interface::FactoryInterface;
 use crate::types::{RWAStatus, RWA};
@@ -236,18 +239,23 @@ impl FactoryInterface for Factory {
         if offering.shipper != shipper {
             panic_with_error!(env, Error::Unauthorized);
         }
-        if offering.status != RWAStatus::Funded {
-            panic_with_error!(env, Error::RwaNotFunded);
-        }
 
         // Release the raised USDC (sum of investor purchases) to the shipper.
-        // shares_bought is always > 0 here because status == Funded requires
-        // all available shares to be purchased.
+        // Allowed at any time after buy_shares has pulled USDC in — the
+        // shipper can take the partial raise early or wait for full funding.
+        let amount = offering.shares_bought;
         usdc_client(&env).transfer(
             &env.current_contract_address(),
-            &MuxedAddress::from(shipper),
-            &offering.shares_bought,
+            &MuxedAddress::from(shipper.clone()),
+            &amount,
         );
+
+        FundCollected {
+            rwa_id,
+            shipper,
+            amount,
+        }
+        .publish(&env);
     }
 
     fn settle_debt(env: Env, rwa_id: String, shipper: Address, principal_amount: i128) {
@@ -259,12 +267,10 @@ impl FactoryInterface for Factory {
         if offering.shipper != shipper {
             panic_with_error!(env, Error::Unauthorized);
         }
-        if offering.status != RWAStatus::Funded {
-            panic_with_error!(env, Error::RwaNotFunded);
-        }
 
-        // Shipper repays the full principal to the factory, which will
-        // disburse it to investors on claim.
+        // Shipper repays principal to the factory, which will disburse it
+        // to investors on claim. Allowed at any time after buy_shares —
+        // settlement is independent of whether the offering is fully sold.
         let factory_addr = env.current_contract_address();
         usdc_client(&env).transfer_from(&factory_addr, &shipper, &factory_addr, &principal_amount);
 
@@ -315,9 +321,6 @@ impl FactoryInterface for Factory {
             panic_with_error!(env, Error::InsufficientPool);
         }
         let interest = amount * offering.interest_bps / 10_000;
-        if offering.interest_pool < interest {
-            panic_with_error!(env, Error::InsufficientPool);
-        }
 
         // Burn the investor's RWA tokens. The burn permit is signed off-chain
         // by the admin signer over (action=2, account=investor, amount, contract=token).
@@ -375,6 +378,26 @@ impl FactoryInterface for Factory {
 
         FeesWithdrawn {
             rwa_id,
+            admin,
+            amount,
+        }
+        .publish(&env);
+    }
+
+    fn emergency_withdraw(env: Env, token: Address, amount: i128, admin: Address) {
+        require_initialized(&env);
+        admin.require_auth();
+        storage::require_admin(&env, &admin);
+        require_positive(&env, amount);
+
+        TokenClient::new(&env, &token).transfer(
+            &env.current_contract_address(),
+            &MuxedAddress::from(admin.clone()),
+            &amount,
+        );
+
+        EmergencyWithdrawn {
+            token,
             admin,
             amount,
         }

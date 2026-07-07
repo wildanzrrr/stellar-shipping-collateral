@@ -52,6 +52,13 @@ pub trait FactoryInterface {
     // ---- protocol admin ----
     fn withdraw_fees(env: Env, rwa_id: String, admin: Address);
 
+    /// Admin-only escape hatch. Transfers `amount` of any token held by
+    /// the factory to `admin` for off-chain incident response. Does not
+    /// alter the offering's status, pool accounting, or investor RWA
+    /// holdings. Use with care: pulling tokens out of an active pool
+    /// desyncs accounting from the live USDC balance.
+    fn emergency_withdraw(env: Env, token: Address, amount: i128, admin: Address);
+
     // ---- views ----
     fn get_rwa(env: Env, rwa_id: String) -> RWA;
     fn list_rwas(env: Env) -> Vec<RWA>;

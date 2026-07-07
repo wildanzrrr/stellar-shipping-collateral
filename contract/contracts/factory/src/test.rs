@@ -826,3 +826,864 @@ fn full_lifecycle_create_buy_collect_settle_claim() {
     let protocol_fee_left = upfront - rwa.raise_amount * rwa.interest_bps / 10_000;
     assert_eq!(f.usdc_balance(&factory_addr), protocol_fee_left);
 }
+
+#[test]
+fn collect_fund_failed_not_initialized() {
+    let f = TestFixture::new();
+    let factory_id = f.env.register(Factory, ());
+    let factory = FactoryClient::new(&f.env, &factory_id);
+    let rwa_id = f.create_rwa(1);
+
+    let res: TryVoid = factory.try_collect_fund(&rwa_id, &f.shipper);
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+}
+
+#[test]
+fn collect_fund_failed_rwa_not_found() {
+    let f = TestFixture::new();
+    let res: TryVoid = f
+        .factory()
+        .try_collect_fund(&String::from_str(&f.env, "nonexistent"), &f.shipper);
+    assert_eq!(res, Err(Ok(Error::RwaNotFound.into())));
+}
+
+#[test]
+fn collect_fund_failed_role_not_kyb() {
+    let f = TestFixture::new();
+    let investor = f.investor.clone();
+    let rwa_id = f.create_rwa(1);
+    let rwa = f.factory().get_rwa(&rwa_id);
+
+    // Investor buy the shares
+    f.usdc()
+        .transfer(&f.admin, &investor, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&investor, rwa.raise_amount);
+    f.factory()
+        .buy_shares(&rwa_id, &investor, &rwa.raise_amount);
+
+    // Investor try to collect fund, but they are not the shipper
+    let res: TryVoid = f.factory().try_collect_fund(&rwa_id, &investor);
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+}
+
+#[test]
+fn collect_fund_success() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+    let rwa = f.factory().get_rwa(&rwa_id);
+
+    // Fund the offering: investor buys 50% of the available shares.
+    let investor = f.investor.clone();
+    let partial_buy = rwa.raise_amount / 2;
+    f.usdc()
+        .transfer(&f.admin, &investor, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&investor, partial_buy);
+    f.factory().buy_shares(&rwa_id, &investor, &partial_buy);
+
+    // Pre-state: factory holds the upfront + partial raise. Shipper paid the
+    // upfront at create time, so they hold 500 - upfront USDC.
+    let upfront = usdc_units(10_000) * (200 + PROTOCOL_FEE_BPS) / 10_000; // 250 USDC
+    let partial_buy = rwa.raise_amount / 2;
+    let shipper_pre = usdc_units(500) - upfront;
+    assert_eq!(f.usdc_balance(&f.factory_id), upfront + partial_buy);
+    assert_eq!(f.usdc_balance(&f.shipper), shipper_pre);
+
+    // Execute the collect_fund.
+    f.factory().collect_fund(&rwa_id, &f.shipper);
+
+    // Post-state: shipper receives the partial raise on top of what they
+    // already hold. Factory retains only the upfront — the unsold half of
+    // the raise never entered the factory, so collect_fund only drains the
+    // USDC that buy_shares actually pulled in (i.e. `shares_bought`).
+    assert_eq!(
+        f.usdc_balance(&f.shipper),
+        shipper_pre + partial_buy,
+        "shipper should receive the partial raise"
+    );
+    assert_eq!(
+        f.usdc_balance(&f.factory_id),
+        upfront,
+        "factory should retain only the upfront after partial collect"
+    );
+}
+
+#[test]
+fn settle_debt_failed_not_initialized() {
+    let f = TestFixture::new();
+    let factory_id = f.env.register(Factory, ());
+    let factory = FactoryClient::new(&f.env, &factory_id);
+    let rwa_id = f.create_rwa(1);
+
+    let res: TryVoid = factory.try_settle_debt(&rwa_id, &f.shipper, &usdc_units(100));
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+}
+
+#[test]
+fn settle_debt_failed_principal_not_positive() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    let res: TryVoid = f.factory().try_settle_debt(&rwa_id, &f.shipper, &0);
+    assert_eq!(res, Err(Ok(Error::InvalidAmount.into())));
+}
+
+#[test]
+fn settle_debt_failed_rwa_not_found() {
+    let f = TestFixture::new();
+    let res: TryVoid = f.factory().try_settle_debt(
+        &String::from_str(&f.env, "nonexistent"),
+        &f.shipper,
+        &usdc_units(100),
+    );
+    assert_eq!(res, Err(Ok(Error::RwaNotFound.into())));
+}
+
+#[test]
+fn settle_debt_failed_shipper_not_shipper() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    // Fund the offering: investor buys 50% of the available shares.
+    let investor = f.investor.clone();
+    let rwa = f.factory().get_rwa(&rwa_id);
+    let partial_buy = rwa.raise_amount / 2;
+    f.usdc()
+        .transfer(&f.admin, &investor, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&investor, partial_buy);
+    f.factory().buy_shares(&rwa_id, &investor, &partial_buy);
+
+    // Investor tries to settle debt, but they are not the shipper
+    let res: TryVoid = f
+        .factory()
+        .try_settle_debt(&rwa_id, &investor, &partial_buy);
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+}
+
+#[test]
+fn settle_debt_success() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    // Fund the offering: investor buys 50% of the available shares.
+    let investor = f.investor.clone();
+    let rwa = f.factory().get_rwa(&rwa_id);
+    let partial_buy = rwa.raise_amount / 2;
+    f.usdc()
+        .transfer(&f.admin, &investor, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&investor, partial_buy);
+    f.factory().buy_shares(&rwa_id, &investor, &partial_buy);
+
+    // Pre-state: factory holds the upfront + partial raise. Shipper paid the
+    // upfront at create time, so they hold 500 - upfront USDC.
+    let upfront = usdc_units(10_000) * (200 + PROTOCOL_FEE_BPS) / 10_000; // 250 USDC
+    let shipper_pre = usdc_units(500) - upfront;
+    assert_eq!(f.usdc_balance(&f.factory_id), upfront + partial_buy);
+    assert_eq!(f.usdc_balance(&f.shipper), shipper_pre);
+
+    // Execute the settle_debt. Admin tops up the shipper so they can repay
+    // the partial raise, then the shipper settles `partial_buy` of principal.
+    let topup = partial_buy + usdc_units(100);
+    f.usdc().transfer(&f.admin, &f.shipper, &topup);
+    f.approve_factory(&f.shipper, partial_buy);
+    f.factory().settle_debt(&rwa_id, &f.shipper, &partial_buy);
+
+    // Post-state: factory receives the settled principal on top of what it
+    // already holds. The factory now has upfront + buy_shares contribution
+    // + settled principal. Shipper paid the partial raise from their
+    // topped-up balance.
+    assert_eq!(
+        f.usdc_balance(&f.factory_id),
+        upfront + 2 * partial_buy,
+        "factory should hold upfront + buy contribution + settled principal"
+    );
+    assert_eq!(
+        f.usdc_balance(&f.shipper),
+        shipper_pre + topup - partial_buy,
+        "shipper should have repaid the partial raise"
+    );
+}
+
+#[test]
+fn settle_debt_success_full_repayment() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    // Fund the offering: investor buys 50% of the available shares.
+    let investor = f.investor.clone();
+    let rwa = f.factory().get_rwa(&rwa_id);
+    let partial_buy = rwa.raise_amount / 2;
+    f.usdc()
+        .transfer(&f.admin, &investor, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&investor, partial_buy);
+    f.factory().buy_shares(&rwa_id, &investor, &partial_buy);
+
+    // Pre-state: factory holds the upfront + partial raise. Shipper paid the
+    // upfront at create time, so they hold 500 - upfront USDC.
+    let upfront = usdc_units(10_000) * (200 + PROTOCOL_FEE_BPS) / 10_000; // 250 USDC
+    let shipper_pre = usdc_units(500) - upfront;
+    assert_eq!(f.usdc_balance(&f.factory_id), upfront + partial_buy);
+    assert_eq!(f.usdc_balance(&f.shipper), shipper_pre);
+
+    // Execute the settle_debt. Admin tops up the shipper so they can repay
+    // the full raise, then the shipper settles `raise_amount` of principal.
+    let topup = rwa.raise_amount + usdc_units(100);
+    f.usdc().transfer(&f.admin, &f.shipper, &topup);
+    f.approve_factory(&f.shipper, rwa.raise_amount);
+    f.factory()
+        .settle_debt(&rwa_id, &f.shipper, &rwa.raise_amount);
+
+    // Post-state: factory receives the settled principal on top of what it
+    // already holds. The factory now has upfront + buy_shares contribution
+    // + settled principal. Shipper paid the full raise from their topped-up balance.
+    assert_eq!(
+        f.usdc_balance(&f.factory_id),
+        upfront + partial_buy + rwa.raise_amount,
+        "factory should hold upfront + buy contribution + settled principal"
+    );
+    assert_eq!(
+        f.usdc_balance(&f.shipper),
+        shipper_pre + topup - rwa.raise_amount,
+        "shipper should have repaid the full raise"
+    );
+}
+
+#[test]
+fn claim_failed_not_initialized() {
+    let f = TestFixture::new();
+    let factory_id = f.env.register(Factory, ());
+    let factory = FactoryClient::new(&f.env, &factory_id);
+    let rwa_id = f.create_rwa(1);
+
+    // The burn permit is signed over the RWA token contract, not the rwa_id.
+    let token_addr = f.factory().get_rwa(&rwa_id).token;
+    let res: TryVoid = factory.try_claim(
+        &rwa_id,
+        &f.investor,
+        &usdc_units(100),
+        &1,
+        &f.deadline(),
+        &f.signature(
+            &token_addr,
+            1,
+            &f.investor,
+            usdc_units(100),
+            1,
+            f.deadline(),
+        ),
+    );
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+}
+
+#[test]
+fn claim_failed_amount_not_positive() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    // The burn permit is signed over the RWA token contract, not the rwa_id.
+    let token_addr = f.factory().get_rwa(&rwa_id).token;
+    let res: TryVoid = f.factory().try_claim(
+        &rwa_id,
+        &f.investor,
+        &0,
+        &1,
+        &f.deadline(),
+        &f.signature(&token_addr, 1, &f.investor, 0, 1, f.deadline()),
+    );
+    assert_eq!(res, Err(Ok(Error::InvalidAmount.into())));
+}
+
+#[test]
+fn claim_failed_rwa_not_found() {
+    let f = TestFixture::new();
+    let res: TryVoid = f.factory().try_claim(
+        &String::from_str(&f.env, "nonexistent"),
+        &f.investor,
+        &usdc_units(100),
+        &1,
+        &f.deadline(),
+        &f.signature(
+            &f.precompute_token_address(&f.salt(1)),
+            1,
+            &f.factory_id,
+            usdc_units(100),
+            1,
+            f.deadline(),
+        ),
+    );
+    assert_eq!(res, Err(Ok(Error::RwaNotFound.into())));
+}
+
+#[test]
+fn claim_failed_rwa_not_settled() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    // The burn permit is signed over the RWA token contract, not the rwa_id.
+    let token_addr = f.factory().get_rwa(&rwa_id).token;
+    let res: TryVoid = f.factory().try_claim(
+        &rwa_id,
+        &f.investor,
+        &usdc_units(100),
+        &1,
+        &f.deadline(),
+        &f.signature(
+            &token_addr,
+            1,
+            &f.investor,
+            usdc_units(100),
+            1,
+            f.deadline(),
+        ),
+    );
+    assert_eq!(res, Err(Ok(Error::RwaNotSettled.into())));
+}
+
+#[test]
+fn claim_failed_deadline_expired() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    // Fund the offering: investor buys all available shares so status flips
+    // to Funded.
+    let rwa = f.factory().get_rwa(&rwa_id);
+    f.usdc()
+        .transfer(&f.admin, &f.investor, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&f.investor, rwa.raise_amount);
+    f.factory()
+        .buy_shares(&rwa_id, &f.investor, &rwa.raise_amount);
+    assert_eq!(f.factory().rwa_status(&rwa_id), RWAStatus::Funded);
+
+    // Shipper collects the fund and settles the debt so status flips to Settled.
+    f.usdc()
+        .transfer(&f.admin, &f.shipper, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&f.shipper, rwa.raise_amount);
+    f.factory().collect_fund(&rwa_id, &f.shipper);
+    f.factory()
+        .settle_debt(&rwa_id, &f.shipper, &rwa.raise_amount);
+    assert_eq!(f.factory().rwa_status(&rwa_id), RWAStatus::Settled);
+
+    // The burn permit is signed over the RWA token contract, not the rwa_id.
+    let token_addr = f.factory().get_rwa(&rwa_id).token;
+    // Advance the ledger so we can construct an `expired_deadline` that is
+    // strictly less than the current sequence (avoids u32 underflow).
+    f.env.ledger().set_sequence_number(1_000_000);
+    let expired_deadline = f.env.ledger().sequence() - 1; // expired
+    let res: TryVoid = f.factory().try_claim(
+        &rwa_id,
+        &f.investor,
+        &usdc_units(100),
+        &1,
+        &expired_deadline, // expired
+        &f.signature(
+            &token_addr,
+            1,
+            &f.investor,
+            usdc_units(100),
+            1,
+            expired_deadline,
+        ),
+    );
+    assert_eq!(res, Err(Ok(Error::InvalidDeadline.into())));
+}
+
+#[test]
+fn claim_failed_investor_dont_have_any_shares() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    // Fund the offering: investor buys all available shares so status flips
+    // to Funded.
+    let rwa = f.factory().get_rwa(&rwa_id);
+    f.usdc()
+        .transfer(&f.admin, &f.investor, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&f.investor, rwa.raise_amount);
+    f.factory()
+        .buy_shares(&rwa_id, &f.investor, &rwa.raise_amount);
+    assert_eq!(f.factory().rwa_status(&rwa_id), RWAStatus::Funded);
+
+    // Shipper collects the fund and settles the debt so status flips to Settled.
+    f.usdc()
+        .transfer(&f.admin, &f.shipper, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&f.shipper, rwa.raise_amount);
+    f.factory().collect_fund(&rwa_id, &f.shipper);
+    f.factory()
+        .settle_debt(&rwa_id, &f.shipper, &rwa.raise_amount);
+    assert_eq!(f.factory().rwa_status(&rwa_id), RWAStatus::Settled);
+
+    // The burn permit is signed over the RWA token contract, not the rwa_id.
+    let token_addr = f.factory().get_rwa(&rwa_id).token;
+    // Bystander: KYC-verified but never bought shares. Must fail with
+    // InsufficientPool on the held-share check, not NotVerified on the role
+    // gate (which is checked earlier in the buy_shares path, not here).
+    let bystander = <soroban_sdk::Address as Address>::generate(&f.env);
+    f.identity().set_identity(
+        &bystander,
+        &true,
+        &String::from_str(&f.env, "US"),
+        &IdentityRole::KYC,
+        &f.admin,
+    );
+    let res: TryVoid = f.factory().try_claim(
+        &rwa_id,
+        &bystander,
+        &usdc_units(100),
+        &1,
+        &f.deadline(),
+        &f.signature(&token_addr, 1, &bystander, usdc_units(100), 1, f.deadline()),
+    );
+    assert_eq!(res, Err(Ok(Error::InsufficientPool.into())));
+}
+
+#[test]
+fn claim_failed_principal_pool_is_less_than_the_amount() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    // Fund the offering: investor buys all available shares so status flips
+    // to Funded.
+    let rwa = f.factory().get_rwa(&rwa_id);
+    f.usdc()
+        .transfer(&f.admin, &f.investor, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&f.investor, rwa.raise_amount);
+    f.factory()
+        .buy_shares(&rwa_id, &f.investor, &rwa.raise_amount);
+    assert_eq!(f.factory().rwa_status(&rwa_id), RWAStatus::Funded);
+
+    // Shipper under-settles: pays only half the raise. The factory tracks
+    // the shortfall in `principal_pool` (still has 0 there from buy_shares),
+    // but the investor's `held` is the full raise. The investor tries to
+    // claim the full raise — must fail with InsufficientPool on the
+    // principal_pool check.
+    f.usdc()
+        .transfer(&f.admin, &f.shipper, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&f.shipper, rwa.raise_amount / 2);
+    f.factory().collect_fund(&rwa_id, &f.shipper);
+    f.factory()
+        .settle_debt(&rwa_id, &f.shipper, &(rwa.raise_amount / 2));
+    assert_eq!(f.factory().rwa_status(&rwa_id), RWAStatus::Settled);
+
+    // The burn permit is signed over the RWA token contract, not the rwa_id.
+    let token_addr = f.factory().get_rwa(&rwa_id).token;
+    // Investor tries to claim the full raise even though the shipper only
+    // settled half. principal_pool (raise/2) < amount (raise) → fail.
+    let res: TryVoid = f.factory().try_claim(
+        &rwa_id,
+        &f.investor,
+        &rwa.raise_amount,
+        &1,
+        &f.deadline(),
+        &f.signature(
+            &token_addr,
+            1,
+            &f.investor,
+            rwa.raise_amount,
+            1,
+            f.deadline(),
+        ),
+    );
+    assert_eq!(res, Err(Ok(Error::InsufficientPool.into())));
+}
+
+#[test]
+fn claim_success() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    // Fund the offering: investor buys all available shares so status flips
+    // to Funded.
+    let rwa = f.factory().get_rwa(&rwa_id);
+    f.usdc()
+        .transfer(&f.admin, &f.investor, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&f.investor, rwa.raise_amount);
+    f.factory()
+        .buy_shares(&rwa_id, &f.investor, &rwa.raise_amount);
+    assert_eq!(f.factory().rwa_status(&rwa_id), RWAStatus::Funded);
+
+    // Shipper collects the fund and settles the debt so status flips to Settled.
+    f.usdc()
+        .transfer(&f.admin, &f.shipper, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&f.shipper, rwa.raise_amount);
+    f.factory().collect_fund(&rwa_id, &f.shipper);
+    f.factory()
+        .settle_debt(&rwa_id, &f.shipper, &rwa.raise_amount);
+    assert_eq!(f.factory().rwa_status(&rwa_id), RWAStatus::Settled);
+
+    // The burn permit is signed over the RWA token contract, not the rwa_id.
+    // The action byte is 2 (burn) — see `sep57::require_admin_permit(&env, 2, ...)`.
+    // Nonce 1 was already burned by the create_rwa_token mint permit, so use 2.
+    let token_addr = f.factory().get_rwa(&rwa_id).token;
+    let pre_claim_investor_usdc = f.usdc_balance(&f.investor);
+    let burn_nonce = 2u64;
+    let burn_deadline = f.deadline();
+    let burn_sig = f.signature(
+        &token_addr,
+        2,
+        &f.investor,
+        rwa.raise_amount,
+        burn_nonce,
+        burn_deadline,
+    );
+    f.factory().claim(
+        &rwa_id,
+        &f.investor,
+        &rwa.raise_amount,
+        &burn_nonce,
+        &burn_deadline,
+        &burn_sig,
+    );
+
+    // Investor burned full raise, received principal + interest.
+    let expected_payout = rwa.raise_amount + rwa.raise_amount * rwa.interest_bps / 10_000;
+    assert_eq!(
+        f.usdc_balance(&f.investor),
+        pre_claim_investor_usdc + expected_payout,
+        "investor should receive principal + interest"
+    );
+    // RWA fully burned.
+    let token = SEP57Client::new(&f.env, &token_addr);
+    assert_eq!(token.balance(&f.investor), 0);
+    assert_eq!(token.total_supply(), 0);
+    // Factory is left with just the protocol fee (interest pool was drained
+    // by the claim). upfront (interest_fee + protocol_fee) - interest_paid =
+    // protocol_fee = 0.05 USDC.
+    let protocol_fee_left = usdc_units(10_000) * PROTOCOL_FEE_BPS / 10_000; // 50 USDC
+    assert_eq!(
+        f.usdc_balance(&f.factory_id),
+        protocol_fee_left,
+        "factory should retain only the protocol fee"
+    );
+}
+
+#[test]
+fn emergency_withdraw_success_usdc() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    // Move USDC into the factory via buy_shares so the contract has
+    // a non-zero balance to drain. 50% buy leaves both pools empty
+    // (interest_pool = 0, principal_pool is on the offering record),
+    // and protocol_fee_pool has the fee skim.
+    let rwa = f.factory().get_rwa(&rwa_id);
+    f.usdc().transfer(
+        &f.admin,
+        &f.investor,
+        &(rwa.raise_amount / 2 + usdc_units(100)),
+    );
+    f.approve_factory(&f.investor, rwa.raise_amount / 2);
+    f.factory()
+        .buy_shares(&rwa_id, &f.investor, &(rwa.raise_amount / 2));
+
+    let factory_balance_before = f.usdc_balance(&f.factory_id);
+    let admin_balance_before = f.usdc_balance(&f.admin);
+    assert!(factory_balance_before > 0);
+
+    // Admin pulls the entire factory USDC balance via the escape hatch.
+    f.factory()
+        .emergency_withdraw(&f.usdc_id, &factory_balance_before, &f.admin);
+
+    assert_eq!(f.usdc_balance(&f.factory_id), 0);
+    assert_eq!(
+        f.usdc_balance(&f.admin),
+        admin_balance_before + factory_balance_before
+    );
+
+    // The RWA record is unchanged — no pool accounting entry was
+    // touched, no status flip. Status is still Open (partial buy).
+    let after = f.factory().get_rwa(&rwa_id);
+    assert_eq!(after.status, RWAStatus::Open);
+    assert_eq!(after.principal_pool, rwa.principal_pool);
+    assert_eq!(after.interest_pool, rwa.interest_pool);
+    assert_eq!(after.protocol_fee_pool, rwa.protocol_fee_pool);
+}
+
+#[test]
+fn emergency_withdraw_partial_drain_usdc() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    // Same setup as success_usdc: 50% buy so the factory has USDC
+    // split across interest_pool, protocol_fee_pool, and the buy.
+    let rwa = f.factory().get_rwa(&rwa_id);
+    f.usdc().transfer(
+        &f.admin,
+        &f.investor,
+        &(rwa.raise_amount / 2 + usdc_units(100)),
+    );
+    f.approve_factory(&f.investor, rwa.raise_amount / 2);
+    f.factory()
+        .buy_shares(&rwa_id, &f.investor, &(rwa.raise_amount / 2));
+
+    let factory_balance_before = f.usdc_balance(&f.factory_id);
+    let admin_balance_before = f.usdc_balance(&f.admin);
+    assert!(factory_balance_before > 0);
+
+    // Drain half the factory's USDC. Pool accounting and status stay
+    // unchanged; the live balance simply drops by the drained amount.
+    let drain = factory_balance_before / 2;
+    f.factory().emergency_withdraw(&f.usdc_id, &drain, &f.admin);
+
+    assert_eq!(
+        f.usdc_balance(&f.factory_id),
+        factory_balance_before - drain
+    );
+    assert_eq!(f.usdc_balance(&f.admin), admin_balance_before + drain);
+
+    let after = f.factory().get_rwa(&rwa_id);
+    assert_eq!(after.status, RWAStatus::Open);
+    assert_eq!(after.principal_pool, rwa.principal_pool);
+    assert_eq!(after.interest_pool, rwa.interest_pool);
+    assert_eq!(after.protocol_fee_pool, rwa.protocol_fee_pool);
+}
+
+#[test]
+fn emergency_withdraw_success_rwa_token() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    // The factory minted the full supply to itself at creation time.
+    // No shares have been sold yet, so it holds the entire supply.
+    let rwa = f.factory().get_rwa(&rwa_id);
+    let supply = f.env.invoke_contract::<i128>(
+        &rwa.token,
+        &soroban_sdk::symbol_short!("balance"),
+        soroban_sdk::vec![&f.env, f.factory_id.to_val()].into(),
+    );
+    assert_eq!(supply, rwa.shares_total);
+
+    // The sep57 token's transfer hook runs `verify_identity` on both
+    // `from` and `to`. The admin isn't KYC'd by default, so register
+    // them as a verified retail investor before moving tokens.
+    f.identity().set_identity(
+        &f.admin,
+        &true,
+        &String::from_str(&f.env, "SGP"),
+        &IdentityRole::KYC,
+        &f.admin,
+    );
+
+    let admin_token_balance_before = f.env.invoke_contract::<i128>(
+        &rwa.token,
+        &soroban_sdk::symbol_short!("balance"),
+        soroban_sdk::vec![&f.env, f.admin.to_val()].into(),
+    );
+
+    f.factory()
+        .emergency_withdraw(&rwa.token, &supply, &f.admin);
+
+    // Factory now holds 0 RWA; admin holds the full supply.
+    let factory_token_balance_after = f.env.invoke_contract::<i128>(
+        &rwa.token,
+        &soroban_sdk::symbol_short!("balance"),
+        soroban_sdk::vec![&f.env, f.factory_id.to_val()].into(),
+    );
+    let admin_token_balance_after = f.env.invoke_contract::<i128>(
+        &rwa.token,
+        &soroban_sdk::symbol_short!("balance"),
+        soroban_sdk::vec![&f.env, f.admin.to_val()].into(),
+    );
+    assert_eq!(factory_token_balance_after, 0);
+    assert_eq!(
+        admin_token_balance_after,
+        admin_token_balance_before + supply
+    );
+}
+
+#[test]
+fn emergency_withdraw_failed_not_admin() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+    let _ = rwa_id;
+
+    // Investor is KYC-verified, but the factory only authorizes the
+    // protocol admin. require_auth still passes (mock_all_auths), but
+    // storage::require_admin rejects.
+    let res: TryVoid = f
+        .factory()
+        .try_emergency_withdraw(&f.usdc_id, &1_i128, &f.investor);
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+}
+
+#[test]
+fn emergency_withdraw_failed_not_initialized() {
+    // Build a fresh env without calling initialize so the contract
+    // has no admin registered.
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = <soroban_sdk::Address as Address>::generate(&env);
+    let factory_id = env.register(Factory, ());
+    let usdc_id = env.register(
+        MockToken,
+        (
+            admin.clone(),
+            7_u32,
+            String::from_str(&env, "USD Coin"),
+            String::from_str(&env, "USDC"),
+        ),
+    );
+
+    let res: TryVoid =
+        FactoryClient::new(&env, &factory_id).try_emergency_withdraw(&usdc_id, &1_i128, &admin);
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+}
+
+#[test]
+fn emergency_withdraw_failed_amount_not_positive() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+    let _ = rwa_id;
+
+    let res: TryVoid = f
+        .factory()
+        .try_emergency_withdraw(&f.usdc_id, &0_i128, &f.admin);
+    assert_eq!(res, Err(Ok(Error::InvalidAmount.into())));
+
+    let res: TryVoid = f
+        .factory()
+        .try_emergency_withdraw(&f.usdc_id, &-1_i128, &f.admin);
+    assert_eq!(res, Err(Ok(Error::InvalidAmount.into())));
+}
+
+// =====================================================================
+// withdraw_fees
+// =====================================================================
+//
+// The protocol fee pool is funded at create_rwa_token time as part of
+// the shipper's upfront USDC (raise_amount * protocol_fee_bps / 10_000),
+// held by the factory until the admin drains it. It's independent of
+// the principal/interest pools and of `claim`, so withdraw_fees works
+// at any time after creation — open, funded, or settled.
+
+#[test]
+fn withdraw_fees_success_after_full_lifecycle() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    // Run the full happy path so the protocol fee pool has 50 USDC and
+    // the factory's live USDC balance is exactly that amount after
+    // claim drains the principal + interest pools.
+    let rwa = f.factory().get_rwa(&rwa_id);
+    f.usdc()
+        .transfer(&f.admin, &f.investor, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&f.investor, rwa.raise_amount);
+    f.factory()
+        .buy_shares(&rwa_id, &f.investor, &rwa.raise_amount);
+
+    f.usdc()
+        .transfer(&f.admin, &f.shipper, &(rwa.raise_amount + usdc_units(100)));
+    f.approve_factory(&f.shipper, rwa.raise_amount);
+    f.factory().collect_fund(&rwa_id, &f.shipper);
+    f.factory()
+        .settle_debt(&rwa_id, &f.shipper, &rwa.raise_amount);
+
+    let token_addr = f.factory().get_rwa(&rwa_id).token;
+    f.factory().claim(
+        &rwa_id,
+        &f.investor,
+        &rwa.raise_amount,
+        &2,
+        &f.deadline(),
+        &f.signature(
+            &token_addr,
+            2,
+            &f.investor,
+            rwa.raise_amount,
+            2,
+            f.deadline(),
+        ),
+    );
+
+    let expected_fee = usdc_units(10_000) * PROTOCOL_FEE_BPS / 10_000;
+    assert_eq!(f.usdc_balance(&f.factory_id), expected_fee);
+    assert_eq!(f.factory().get_rwa(&rwa_id).protocol_fee_pool, expected_fee);
+
+    let admin_usdc_before = f.usdc_balance(&f.admin);
+    f.factory().withdraw_fees(&rwa_id, &f.admin);
+
+    // Admin receives the full protocol fee; factory's USDC drops to 0.
+    assert_eq!(f.usdc_balance(&f.admin), admin_usdc_before + expected_fee);
+    assert_eq!(f.usdc_balance(&f.factory_id), 0);
+    // The offering's protocol_fee_pool is zeroed, principal/interest
+    // were already zeroed by claim.
+    let after = f.factory().get_rwa(&rwa_id);
+    assert_eq!(after.protocol_fee_pool, 0);
+    assert_eq!(after.principal_pool, 0);
+    assert_eq!(after.interest_pool, 0);
+}
+
+#[test]
+fn withdraw_fees_success_on_open_offering() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    // No buy, no settle. The factory holds the *entire* shipper upfront
+    // (interest pool + protocol fee pool); withdraw_fees only drains the
+    // protocol fee portion, leaving the interest pool intact.
+    let expected_fee = usdc_units(10_000) * PROTOCOL_FEE_BPS / 10_000;
+    let expected_interest = usdc_units(10_000) * 200 / 10_000;
+    let after_create = f.factory().get_rwa(&rwa_id);
+    assert_eq!(after_create.protocol_fee_pool, expected_fee);
+    assert_eq!(
+        f.usdc_balance(&f.factory_id),
+        expected_fee + expected_interest
+    );
+
+    let admin_usdc_before = f.usdc_balance(&f.admin);
+    f.factory().withdraw_fees(&rwa_id, &f.admin);
+
+    assert_eq!(f.usdc_balance(&f.admin), admin_usdc_before + expected_fee);
+    // Factory still holds the upfront interest, untouched.
+    assert_eq!(f.usdc_balance(&f.factory_id), expected_interest);
+    assert_eq!(f.factory().get_rwa(&rwa_id).protocol_fee_pool, 0);
+    assert_eq!(
+        f.factory().get_rwa(&rwa_id).interest_pool,
+        expected_interest
+    );
+    // Offering status stays Open — withdraw_fees doesn't touch lifecycle.
+    assert_eq!(f.factory().rwa_status(&rwa_id), RWAStatus::Open);
+}
+
+#[test]
+fn withdraw_fees_failed_not_admin() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    // Shipper is KYB but not the protocol admin. The factory only
+    // authorizes `admin` for fee withdrawal. (mock_all_auths passes
+    // require_auth; require_admin rejects.)
+    let res: TryVoid = f.factory().try_withdraw_fees(&rwa_id, &f.shipper);
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+}
+
+#[test]
+fn withdraw_fees_failed_not_initialized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = <soroban_sdk::Address as Address>::generate(&env);
+    let factory_id = env.register(Factory, ());
+
+    let rwa_id = String::from_str(&env, "RWA-1");
+    let res: TryVoid = FactoryClient::new(&env, &factory_id).try_withdraw_fees(&rwa_id, &admin);
+    assert_eq!(res, Err(Ok(Error::Unauthorized.into())));
+}
+
+#[test]
+fn withdraw_fees_failed_rwa_not_found() {
+    let f = TestFixture::new();
+    let missing = String::from_str(&f.env, "RWA-MISSING");
+    let res: TryVoid = f.factory().try_withdraw_fees(&missing, &f.admin);
+    assert_eq!(res, Err(Ok(Error::RwaNotFound.into())));
+}
+
+#[test]
+fn withdraw_fees_failed_no_fees() {
+    let f = TestFixture::new();
+    let rwa_id = f.create_rwa(1);
+
+    // Drain the fee pool once successfully.
+    f.factory().withdraw_fees(&rwa_id, &f.admin);
+    assert_eq!(f.factory().get_rwa(&rwa_id).protocol_fee_pool, 0);
+
+    // A second attempt finds nothing to withdraw.
+    let res: TryVoid = f.factory().try_withdraw_fees(&rwa_id, &f.admin);
+    assert_eq!(res, Err(Ok(Error::InsufficientPool.into())));
+}
