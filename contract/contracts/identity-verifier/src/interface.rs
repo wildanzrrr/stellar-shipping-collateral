@@ -4,7 +4,7 @@ use crate::types::{Identity, IdentityRole};
 
 #[contracttrait]
 pub trait IdentityVerifierInteface {
-    fn __constructor(env: Env, admin: Address);
+    fn initialize(env: Env, admin: Address);
     fn verify_identity(env: Env, user: Address);
     fn set_identity(
         env: Env,

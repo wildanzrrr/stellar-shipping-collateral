@@ -7,4 +7,5 @@ pub enum Error {
     Unauthorized = 1,
     IdentityNotVerified = 2,
     IdentityNotFound = 3,
+    AlreadyInitialized = 4,
 }

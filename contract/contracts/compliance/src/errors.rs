@@ -9,4 +9,5 @@ pub enum Error {
     InvalidAmount = 3,
     InvalidMaxBalance = 4,
     MaxBalanceExceeded = 5,
+    AlreadyInitialized = 6,
 }

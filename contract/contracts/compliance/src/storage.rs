@@ -3,16 +3,27 @@ use soroban_sdk::{panic_with_error, Address, Env};
 use crate::errors::Error;
 use crate::types::DataKey;
 
-pub fn set_admin(env: &Env, admin: &Address) {
-    env.storage().instance().set(&DataKey::Admin, admin);
+pub fn set_initialized(env: &Env) {
+    env.storage().instance().set(&DataKey::Initialized, &true);
 }
 
-pub fn admin(env: &Env) -> Address {
-    env.storage().instance().get(&DataKey::Admin).unwrap()
+pub fn is_initialized(env: &Env) -> bool {
+    env.storage()
+        .instance()
+        .get(&DataKey::Initialized)
+        .unwrap_or(false)
 }
 
-pub fn require_admin(env: &Env, operator: &Address) {
-    if admin(env) != *operator {
+pub fn set_operator(env: &Env, operator: &Address) {
+    env.storage().instance().set(&DataKey::Operator, operator);
+}
+
+pub fn operator(env: &Env) -> Address {
+    env.storage().instance().get(&DataKey::Operator).unwrap()
+}
+
+pub fn require_operator(env: &Env, caller: &Address) {
+    if operator(env) != *caller {
         panic_with_error!(env, Error::Unauthorized);
     }
 }

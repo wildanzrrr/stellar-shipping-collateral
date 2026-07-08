@@ -3,6 +3,7 @@ use soroban_sdk::{contracttype, Address, String};
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
+    Initialized,
     Admin,
     Users,
 }

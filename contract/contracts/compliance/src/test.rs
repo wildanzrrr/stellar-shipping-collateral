@@ -8,7 +8,7 @@ use soroban_sdk::{
 
 struct TestFixture {
     env: Env,
-    admin: soroban_sdk::Address,
+    operator: soroban_sdk::Address,
     token: soroban_sdk::Address,
     contract_id: soroban_sdk::Address,
 }
@@ -18,13 +18,15 @@ impl TestFixture {
         let env = Env::default();
         env.mock_all_auths();
 
-        let admin = <soroban_sdk::Address as Address>::generate(&env);
+        let operator = <soroban_sdk::Address as Address>::generate(&env);
         let token = <soroban_sdk::Address as Address>::generate(&env);
-        let contract_id = env.register(Compliance, (admin.clone(),));
+        let contract_id = env.register(Compliance, ());
+        let client = ComplianceClient::new(&env, &contract_id);
+        client.initialize(&operator);
 
         Self {
             env,
-            admin,
+            operator,
             token,
             contract_id,
         }
@@ -40,29 +42,29 @@ impl TestFixture {
 }
 
 #[test]
-fn non_admin_cannot_bind_token() {
+fn non_operator_cannot_bind_token() {
     let fixture = TestFixture::new();
     let client = fixture.client();
-    let non_admin = fixture.address();
+    let non_operator = fixture.address();
 
     assert_eq!(
-        client.try_bind_token(&fixture.token, &non_admin),
+        client.try_bind_token(&fixture.token, &non_operator),
         Err(Ok(Error::Unauthorized.into()))
     );
 }
 
 #[test]
-fn admin_can_bind_token() {
+fn operator_can_bind_token() {
     let fixture = TestFixture::new();
     let client = fixture.client();
     let new_token = fixture.address();
 
-    client.bind_token(&new_token, &fixture.admin);
+    client.bind_token(&new_token, &fixture.operator);
     fixture.env.as_contract(&fixture.contract_id, || {
         Compliance::bind_token(
             fixture.env.clone(),
             new_token.clone(),
-            fixture.admin.clone(),
+            fixture.operator.clone(),
         );
     });
 
@@ -81,30 +83,30 @@ fn admin_can_bind_token() {
 }
 
 #[test]
-fn non_admin_cannot_unbind_token() {
+fn non_operator_cannot_unbind_token() {
     let fixture = TestFixture::new();
     let client = fixture.client();
-    let non_admin = fixture.address();
+    let non_operator = fixture.address();
 
     assert_eq!(
-        client.try_unbind_token(&fixture.token, &non_admin),
+        client.try_unbind_token(&fixture.token, &non_operator),
         Err(Ok(Error::Unauthorized.into()))
     );
 }
 
 #[test]
-fn admin_can_unbind_token() {
+fn operator_can_unbind_token() {
     let fixture = TestFixture::new();
     let client = fixture.client();
 
-    client.bind_token(&fixture.token, &fixture.admin);
-    client.unbind_token(&fixture.token, &fixture.admin);
+    client.bind_token(&fixture.token, &fixture.operator);
+    client.unbind_token(&fixture.token, &fixture.operator);
 
     fixture.env.as_contract(&fixture.contract_id, || {
         Compliance::unbind_token(
             fixture.env.clone(),
             fixture.token.clone(),
-            fixture.admin.clone(),
+            fixture.operator.clone(),
         );
     });
 
@@ -123,13 +125,13 @@ fn admin_can_unbind_token() {
 }
 
 #[test]
-fn non_admin_cannot_set_max_balance() {
+fn non_operator_cannot_set_max_balance() {
     let fixture = TestFixture::new();
     let client = fixture.client();
-    let non_admin = fixture.address();
+    let non_operator = fixture.address();
 
     assert_eq!(
-        client.try_set_max_balance(&fixture.token, &1_000, &non_admin),
+        client.try_set_max_balance(&fixture.token, &1_000, &non_operator),
         Err(Ok(Error::Unauthorized.into()))
     );
 }
@@ -141,7 +143,7 @@ fn cannot_set_max_balance_for_unbound_token() {
     let invalid_token = fixture.address();
 
     assert_eq!(
-        client.try_set_max_balance(&invalid_token, &1_000, &fixture.admin),
+        client.try_set_max_balance(&invalid_token, &1_000, &fixture.operator),
         Err(Ok(Error::TokenNotBound.into()))
     );
 }
@@ -151,27 +153,27 @@ fn cannot_set_negative_max_balance() {
     let fixture = TestFixture::new();
     let client = fixture.client();
 
-    client.bind_token(&fixture.token, &fixture.admin);
+    client.bind_token(&fixture.token, &fixture.operator);
     assert_eq!(
-        client.try_set_max_balance(&fixture.token, &-1_000, &fixture.admin),
+        client.try_set_max_balance(&fixture.token, &-1_000, &fixture.operator),
         Err(Ok(Error::InvalidAmount.into()))
     );
 }
 
 #[test]
-fn admin_can_set_max_balance() {
+fn operator_can_set_max_balance() {
     let fixture = TestFixture::new();
     let client = fixture.client();
 
-    client.bind_token(&fixture.token, &fixture.admin);
-    client.set_max_balance(&fixture.token, &1_000, &fixture.admin);
+    client.bind_token(&fixture.token, &fixture.operator);
+    client.set_max_balance(&fixture.token, &1_000, &fixture.operator);
 
     fixture.env.as_contract(&fixture.contract_id, || {
         Compliance::set_max_balance(
             fixture.env.clone(),
             fixture.token.clone(),
             1_000,
-            fixture.admin.clone(),
+            fixture.operator.clone(),
         );
     });
 
@@ -188,4 +190,21 @@ fn admin_can_set_max_balance() {
 
     assert_eq!(contract_events, [expected_event]);
     assert_eq!(client.max_balance(&fixture.token), 1_000);
+}
+
+#[test]
+fn initialize_failed_because_already_initialized() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let operator = <soroban_sdk::Address as Address>::generate(&env);
+    let contract_id = env.register(Compliance, ());
+    let client = ComplianceClient::new(&env, &contract_id);
+
+    client.initialize(&operator);
+
+    assert_eq!(
+        client.try_initialize(&operator),
+        Err(Ok(Error::AlreadyInitialized.into()))
+    );
 }

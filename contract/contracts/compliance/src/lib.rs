@@ -17,15 +17,20 @@ pub struct Compliance;
 
 #[contractimpl]
 impl ComplianceInterface for Compliance {
-    fn __constructor(env: Env, admin: Address) {
-        storage::set_admin(&env, &admin);
+    fn initialize(env: Env, operator: Address) {
+        if storage::is_initialized(&env) {
+            panic_with_error!(env, Error::AlreadyInitialized);
+        }
 
-        Initialized { admin }.publish(&env);
+        storage::set_initialized(&env);
+        storage::set_operator(&env, &operator);
+
+        Initialized { operator }.publish(&env);
     }
 
     fn bind_token(env: Env, token: Address, operator: Address) {
         operator.require_auth();
-        storage::require_admin(&env, &operator);
+        storage::require_operator(&env, &operator);
 
         storage::set_token_bound(&env, &token, true);
 
@@ -34,7 +39,7 @@ impl ComplianceInterface for Compliance {
 
     fn unbind_token(env: Env, token: Address, operator: Address) {
         operator.require_auth();
-        storage::require_admin(&env, &operator);
+        storage::require_operator(&env, &operator);
 
         storage::set_token_bound(&env, &token, false);
 
@@ -43,7 +48,7 @@ impl ComplianceInterface for Compliance {
 
     fn set_max_balance(env: Env, token: Address, max_balance: i128, operator: Address) {
         operator.require_auth();
-        storage::require_admin(&env, &operator);
+        storage::require_operator(&env, &operator);
         require_bound_token(&env, &token);
         require_positive(&env, max_balance);
 

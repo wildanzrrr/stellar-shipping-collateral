@@ -18,7 +18,9 @@ impl TestFixture {
         env.mock_all_auths();
 
         let admin = <soroban_sdk::Address as Address>::generate(&env);
-        let contract_id = env.register(IdentityVerifier, (admin.clone(),));
+        let contract_id = env.register(IdentityVerifier, ());
+        let client = IdentityVerifierClient::new(&env, &contract_id);
+        client.initialize(&admin);
 
         Self {
             env,
@@ -177,4 +179,36 @@ fn get_identity_returns_identity_for_existing_user() {
     assert_eq!(identity.verified, true);
     assert_eq!(identity.country_code, country_code);
     assert_eq!(identity.role, IdentityRole::KYC);
+}
+
+#[test]
+fn initialize_failed_because_already_initialized() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = <soroban_sdk::Address as Address>::generate(&env);
+    let contract_id = env.register(IdentityVerifier, ());
+    let client = IdentityVerifierClient::new(&env, &contract_id);
+
+    client.initialize(&admin);
+
+    assert_eq!(
+        client.try_initialize(&admin),
+        Err(Ok(Error::AlreadyInitialized.into()))
+    );
+}
+
+#[test]
+fn verify_identity_panics_when_contract_not_initialized() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(IdentityVerifier, ());
+    let client = IdentityVerifierClient::new(&env, &contract_id);
+    let user = <soroban_sdk::Address as Address>::generate(&env);
+
+    assert_eq!(
+        client.try_verify_identity(&user),
+        Err(Ok(Error::Unauthorized.into()))
+    );
 }

@@ -1,20 +1,43 @@
-use soroban_sdk::{panic_with_error, Address, Env, String};
+use soroban_sdk::{Address, BytesN, Env, String};
 
-use crate::errors::Error;
 pub use crate::types::DataKey;
+
+pub fn set_initialized(env: &Env) {
+    env.storage().instance().set(&DataKey::Initialized, &true);
+}
+
+pub fn is_initialized(env: &Env) -> bool {
+    env.storage()
+        .instance()
+        .get(&DataKey::Initialized)
+        .unwrap_or(false)
+}
 
 pub fn set_admin(env: &Env, admin: &Address) {
     env.storage().instance().set(&DataKey::Admin, admin);
 }
 
-pub fn admin(env: &Env) -> Address {
-    env.storage().instance().get(&DataKey::Admin).unwrap()
+pub fn set_admin_signer(env: &Env, admin_signer: &BytesN<32>) {
+    env.storage()
+        .instance()
+        .set(&DataKey::AdminSigner, admin_signer);
 }
 
-pub fn require_admin(env: &Env, operator: &Address) {
-    if admin(env) != *operator {
-        panic_with_error!(env, Error::Unauthorized);
-    }
+pub fn admin_signer(env: &Env) -> BytesN<32> {
+    env.storage().instance().get(&DataKey::AdminSigner).unwrap()
+}
+
+pub fn nonce_used(env: &Env, nonce: u64) -> bool {
+    env.storage()
+        .instance()
+        .get(&DataKey::UsedNonce(nonce))
+        .unwrap_or(false)
+}
+
+pub fn set_nonce_used(env: &Env, nonce: u64) {
+    env.storage()
+        .instance()
+        .set(&DataKey::UsedNonce(nonce), &true);
 }
 
 pub fn set_identity_verifier(env: &Env, identity_verifier: &Address) {
