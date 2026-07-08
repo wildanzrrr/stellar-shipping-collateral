@@ -47,7 +47,7 @@ export function SiteNav() {
           </a>
         </nav>
         <div className="bk-nav__right">
-          <Link href="/dashboard" className="bk-btn bk-btn--fill">
+          <Link href="/app" className="bk-btn bk-btn--fill">
             Open app
           </Link>
         </div>

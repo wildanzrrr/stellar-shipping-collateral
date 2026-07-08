@@ -10,11 +10,22 @@ datasource db {
   provider = "postgresql"
 }
 
+enum UserRole {
+  INVESTOR
+  SHIPPING_COMPANY
+}
+
 model User {
   id            String        @id @default(cuid())
   username      String        @unique
+  email         String        @unique
+  firstName     String?
+  lastName      String?
+  role          UserRole      @default(INVESTOR)
   dfnsUserId    String?       @unique
   userAuthToken String?
+  // SHA-256 hash of the currently-valid refresh token (rotation / revocation).
+  refreshTokenHash String?
   wallet        Wallet?
   signSession   SignSession[]
 
@@ -23,6 +34,7 @@ model User {
   deletedAt DateTime?
 
   @@index([username])
+  @@index([email])
   @@index([dfnsUserId])
 }
 

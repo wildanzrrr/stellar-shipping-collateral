@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google"
 
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
+import { Toaster } from "@/components/ui/sonner"
 import { cn } from "@/lib/utils";
 import { createMetadata, siteJsonLd } from "@/lib/seo"
 
@@ -19,11 +20,8 @@ const fontMono = Geist_Mono({
 export const metadata: Metadata = createMetadata()
 
 export const viewport: Viewport = {
-  themeColor: [
-    // approximations of --bk-paper (oklch 99%/15% at hue 130), see tokens.css
-    { media: "(prefers-color-scheme: light)", color: "#fcfdfa" },
-    { media: "(prefers-color-scheme: dark)", color: "#1f231e" },
-  ],
+  // light-only (dark mode disabled) — approximation of --bk-paper, see tokens.css
+  themeColor: "#fcfdfa",
 }
 
 export default function RootLayout({
@@ -42,7 +40,10 @@ export default function RootLayout({
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(siteJsonLd()) }}
         />
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          {children}
+          <Toaster />
+        </ThemeProvider>
       </body>
     </html>
   )
