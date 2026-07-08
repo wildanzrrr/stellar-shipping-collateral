@@ -38,6 +38,8 @@ export class JwtAuthGuard implements CanActivate {
         sub: payload.sub,
         email: payload.email,
         role: payload.role,
+        walletId: payload.walletId,
+        walletAddress: payload.walletAddress,
       };
       return true;
     } catch {

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useSession, signOut } from "next-auth/react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { webauthn } from "@/lib/dfns"
@@ -74,9 +75,11 @@ export default function AppDashboard() {
       setStatusMsg("Delegating wallet to you…")
       await walletApi.delegateWallet(accessToken, email, w.id)
       setWallet(w)
-      setStatusMsg("Wallet created and delegated.")
+      setStatusMsg("")
+      toast.success("Wallet created and delegated")
     } catch (e: any) {
-      setStatusMsg(`Error: ${e.message}`)
+      setStatusMsg("")
+      toast.error(e?.message ?? "Could not create wallet")
     } finally {
       setBusy(false)
     }
@@ -109,9 +112,11 @@ export default function AppDashboard() {
 
       const sig = result?.signature ?? result?.signedTransaction ?? result
       setSignature(typeof sig === "string" ? sig : JSON.stringify(sig, null, 2))
-      setStatusMsg("Signed.")
+      setStatusMsg("")
+      toast.success("Message signed")
     } catch (e: any) {
-      setStatusMsg(`Error: ${e.message}`)
+      setStatusMsg("")
+      toast.error(e?.message ?? "Could not sign message")
     } finally {
       setBusy(false)
     }

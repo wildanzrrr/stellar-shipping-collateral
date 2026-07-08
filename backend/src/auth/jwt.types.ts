@@ -4,6 +4,8 @@ export interface AccessTokenPayload {
   sub: string; // user id
   email: string;
   role: UserRoleValue;
+  walletId?: string; // DFNS wallet id
+  walletAddress?: string; // Stellar address
 }
 
 export interface RefreshTokenPayload extends AccessTokenPayload {

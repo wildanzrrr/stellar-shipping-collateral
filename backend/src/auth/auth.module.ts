@@ -5,9 +5,10 @@ import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { UsersModule } from '../users/users.module';
 import { DfnsModule } from '../dfns/dfns.module';
+import { WalletsModule } from '../wallets/wallets.module';
 
 @Module({
-  imports: [JwtModule.register({}), UsersModule, DfnsModule],
+  imports: [JwtModule.register({}), UsersModule, DfnsModule, WalletsModule],
   controllers: [AuthController],
   providers: [AuthService, JwtAuthGuard],
   exports: [AuthService, JwtAuthGuard, JwtModule],

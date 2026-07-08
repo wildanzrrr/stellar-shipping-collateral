@@ -82,7 +82,6 @@ export const authApi = {
     }),
   loginComplete: (body: {
     email: string
-    temporaryAuthenticationToken: string
     challengeIdentifier: string
     firstFactor: unknown
   }) =>

@@ -63,11 +63,6 @@ export class LoginCompleteDTO {
   @IsNotEmpty()
   email: string;
 
-  @ApiProperty({ description: 'Temporary auth token from login/init' })
-  @IsNotEmpty()
-  @IsString()
-  temporaryAuthenticationToken: string;
-
   @ApiProperty({ description: 'Challenge identifier from login/init' })
   @IsNotEmpty()
   @IsString()

@@ -3,6 +3,7 @@
 import { Suspense, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { signIn } from "next-auth/react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { webauthn } from "@/lib/dfns"
@@ -24,7 +25,6 @@ function AuthInner() {
   const [lastName, setLastName] = useState("")
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState("")
-  const [error, setError] = useState("")
 
   // DFNS login ceremony -> BE issues JWTs -> establish NextAuth session.
   async function completeLogin(userEmail: string) {
@@ -37,7 +37,6 @@ function AuthInner() {
     setStatus("Verifying…")
     const result: AuthResult = await authApi.loginComplete({
       email: userEmail,
-      temporaryAuthenticationToken: init.temporaryAuthenticationToken,
       challengeIdentifier: init.challengeIdentifier,
       firstFactor,
     })
@@ -56,6 +55,7 @@ function AuthInner() {
     })
 
     if (res?.error) throw new Error("Could not start session")
+    toast.success("Signed in")
     router.push(callbackUrl)
     router.refresh()
   }
@@ -64,11 +64,10 @@ function AuthInner() {
     const e = email.trim()
     if (!e) return
     setBusy(true)
-    setError("")
     try {
       await completeLogin(e)
     } catch (err: any) {
-      setError(err?.message ?? "Login failed")
+      toast.error(err?.message ?? "Login failed")
       setStatus("")
     } finally {
       setBusy(false)
@@ -79,7 +78,6 @@ function AuthInner() {
     const e = email.trim()
     if (!e) return
     setBusy(true)
-    setError("")
     try {
       setStatus("Checking your account…")
       const regInit: any = await authApi.registerInit({
@@ -109,7 +107,7 @@ function AuthInner() {
       // Freshly registered — now log in to mint tokens + session.
       await completeLogin(e)
     } catch (err: any) {
-      setError(err?.message ?? "Registration failed")
+      toast.error(err?.message ?? "Registration failed")
       setStatus("")
     } finally {
       setBusy(false)
@@ -135,7 +133,6 @@ function AuthInner() {
             type="button"
             onClick={() => {
               setMode("login")
-              setError("")
               setStatus("")
             }}
             className={`flex-1 rounded-md px-3 py-1.5 ${
@@ -148,7 +145,6 @@ function AuthInner() {
             type="button"
             onClick={() => {
               setMode("register")
-              setError("")
               setStatus("")
             }}
             className={`flex-1 rounded-md px-3 py-1.5 ${
@@ -259,9 +255,6 @@ function AuthInner() {
           <div className="text-center text-xs text-muted-foreground">
             → {status}
           </div>
-        )}
-        {error && (
-          <div className="text-center text-xs text-red-500">{error}</div>
         )}
       </div>
     </div>
