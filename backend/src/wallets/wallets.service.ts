@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { DfnsDelegatedApiClient } from '@dfns/sdk';
 import {
+  Asset,
   BASE_FEE,
   Horizon,
   Networks,
@@ -17,7 +18,13 @@ import { WalletsRepository } from './wallets.repository';
 import { UsersRepository } from 'src/users/users.repository';
 import { DfnsService } from 'src/dfns/dfns.service';
 import { SuccessResponseDTO } from 'src/utils/dto';
-import { DFNS_NETWORK, HORIZON_URL, FRIENDBOT_URL } from 'src/utils/constant';
+import {
+  DFNS_NETWORK,
+  HORIZON_URL,
+  FRIENDBOT_URL,
+  USDC_ISSUER,
+  USDC_ASSET_CODE,
+} from 'src/utils/constant';
 import { generateCustomId } from 'src/utils/utils';
 import {
   CreateWalletDTO,
@@ -149,6 +156,62 @@ export class WalletsService {
       this.logger.error('Error in delegateWallet', error);
       throw error;
     }
+  }
+
+  /**
+   * Add a USDC trustline to a freshly-created (still SA-owned) wallet, signed
+   * and broadcast by the service account — no passkey needed. Must run *before*
+   * delegation, while the SA can still sign for the wallet. Idempotent.
+   */
+  async addUsdcTrustline(walletId: string, address: string): Promise<void> {
+    this.logger.debug('Adding USDC trustline', { walletId, address });
+
+    // Load (and if needed, fund) the account so it exists and has a sequence#.
+    let account: Awaited<ReturnType<typeof horizon.loadAccount>>;
+    try {
+      account = await horizon.loadAccount(address);
+    } catch (error) {
+      const status = (error as { response?: { status?: number } })?.response
+        ?.status;
+      if (status === 404) {
+        await fundTestnetAccount(address);
+        account = await horizon.loadAccount(address);
+      } else {
+        throw error;
+      }
+    }
+
+    // Skip if the trustline already exists.
+    const alreadyTrusted = account.balances.some(
+      (b) =>
+        'asset_code' in b &&
+        'asset_issuer' in b &&
+        b.asset_code === USDC_ASSET_CODE &&
+        b.asset_issuer === USDC_ISSUER,
+    );
+    if (alreadyTrusted) {
+      this.logger.debug('USDC trustline already present, skipping');
+      return;
+    }
+
+    const usdc = new Asset(USDC_ASSET_CODE, USDC_ISSUER);
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: NETWORK_PASSPHRASE,
+    })
+      .addOperation(Operation.changeTrust({ asset: usdc }))
+      .setTimeout(180)
+      .build();
+    const transactionXdr = '0x' + tx.toEnvelope().toXDR('hex');
+
+    // DFNS signs with the wallet's key (authorized by the SA credential) and
+    // broadcasts to Stellar Testnet.
+    await this.dfns.api.wallets.broadcastTransaction({
+      walletId,
+      body: { kind: 'Transaction', transaction: transactionXdr },
+    });
+
+    this.logger.debug('USDC trustline broadcast submitted', { walletId });
   }
 
   /**

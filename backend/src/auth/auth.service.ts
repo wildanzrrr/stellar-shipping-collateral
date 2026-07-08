@@ -284,6 +284,9 @@ export class AuthService {
       });
       const data = created.data as WalletData | undefined;
       if (data?.id) {
+        // Trust USDC while the SA still owns the wallet (before delegation),
+        // so it can later be faucet-funded with USDC.
+        await this.walletsService.addUsdcTrustline(data.id, data.address);
         await this.walletsService.delegateWallet(data.id, { username: email });
       }
     } catch (error) {
