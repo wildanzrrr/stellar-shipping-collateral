@@ -11,14 +11,14 @@ interface NavLink {
 }
 
 const INVESTOR_LINKS: NavLink[] = [
-  { href: "/app/investments", label: "My investment" },
+  { href: "/app", label: "My investment" },
   { href: "/app/collateral", label: "Available collateral" },
   { href: "/app/profile", label: "Profile" },
   { href: "/app/history", label: "History" },
 ]
 
 const SHIPPING_LINKS: NavLink[] = [
-  { href: "/app/collateral", label: "My collateral" },
+  { href: "/app", label: "My collateral" },
   { href: "/app/profile", label: "Profile" },
   { href: "/app/history", label: "History" },
 ]
@@ -44,16 +44,19 @@ export function AppNavMenu({ role }: AppNavMenuProps) {
   return (
     <nav className="hidden items-center gap-1 sm:flex" aria-label="App pages">
       {links.map((l) => {
-        const active = pathname === l.href || pathname.startsWith(l.href + "/")
+        const active =
+          l.href === "/app"
+            ? pathname === "/app"
+            : pathname === l.href || pathname.startsWith(l.href + "/")
         return (
           <Link
             key={l.href}
             href={l.href}
             className={
-              "rounded-md px-3 py-1.5 text-sm font-medium transition-colors " +
+              "rounded-md px-3 py-1.5 text-sm transition-colors " +
               (active
-                ? "bg-muted text-foreground"
-                : "text-muted-foreground hover:bg-muted/60 hover:text-foreground")
+                ? "bg-muted font-bold text-foreground"
+                : "font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground")
             }
           >
             {l.label}
