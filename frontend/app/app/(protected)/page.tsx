@@ -5,10 +5,10 @@ import { useSession } from "next-auth/react"
 
 import { authApi, ROLE_LABELS, type UserRole } from "@/lib/api"
 
-import { RolePanel } from "./_components/role-panel"
-import { WalletInfo } from "./_components/wallet-info"
-import { SignMessageForm } from "./_components/sign-message-form"
-import { useSignMessage } from "./_components/use-sign-message"
+import { RolePanel } from "../_components/role-panel"
+import { WalletInfo } from "../_components/wallet-info"
+import { SignMessageForm } from "../_components/sign-message-form"
+import { useSignMessage } from "../_components/use-sign-message"
 
 export default function AppDashboard() {
   const { data: session } = useSession()
@@ -31,7 +31,7 @@ export default function AppDashboard() {
   const sign = useSignMessage({ accessToken, email, walletId })
 
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center gap-6 p-6">
+    <div className="flex flex-col gap-6 py-6">
       <div className="flex w-full max-w-xl flex-col gap-4 text-sm">
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-medium">DFNS + Stellar Testnet</h1>

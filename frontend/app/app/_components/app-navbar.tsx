@@ -23,16 +23,21 @@ export function AppNavbar({ accessToken }: { accessToken: string }) {
   const user = meQuery.data
 
   return (
-    <header className="sticky top-0 z-40 flex h-14 items-center justify-between border-b bg-background/80 px-4 backdrop-blur-sm">
-      <AppNavLogo />
-      <AppNavMenu role={user?.role} />
-      <WalletModal
-        email={user?.email ?? ""}
-        role={user?.role}
-        firstName={user?.firstName}
-        lastName={user?.lastName}
-        walletAddress={user?.walletAddress ?? null}
-      />
+    <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-sm">
+      <div
+        className="mx-auto flex h-14 items-center justify-between px-[var(--bk-gutter)]"
+        style={{ maxWidth: "var(--bk-page-max)" }}
+      >
+        <AppNavLogo />
+        <AppNavMenu role={user?.role} />
+        <WalletModal
+          email={user?.email ?? ""}
+          role={user?.role}
+          firstName={user?.firstName}
+          lastName={user?.lastName}
+          walletAddress={user?.walletAddress ?? null}
+        />
+      </div>
     </header>
   )
 }

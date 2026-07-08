@@ -3,7 +3,6 @@ import type { Metadata } from "next"
 import { createMetadata } from "@/lib/seo"
 import { AuthSessionProvider } from "@/components/session-provider"
 import { QueryProvider } from "@/components/query-provider"
-import { AppShell } from "@/components/app/app-shell"
 
 // The /app surface is the authenticated product (wallet dashboard + auth).
 // Kept out of search results; access is gated by middleware.
@@ -15,14 +14,17 @@ export const metadata: Metadata = createMetadata({
   noIndex: true,
 })
 
+/**
+ * Provides session + query context to every /app/* route — both the auth page
+ * (pre-login) and the protected dashboard (post-login).  The AppShell gate
+ * lives in `(protected)/layout.tsx` so /app/auth is never wrapped by it.
+ */
 export default function AppLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <AuthSessionProvider>
-      <QueryProvider>
-        <AppShell>{children}</AppShell>
-      </QueryProvider>
+      <QueryProvider>{children}</QueryProvider>
     </AuthSessionProvider>
   )
 }

@@ -32,7 +32,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-svh flex-col">
       <AppNavbar accessToken={accessToken} />
-      <main className="flex-1">{children}</main>
+      <main className="flex-1">
+        <div
+          className="mx-auto px-[var(--bk-gutter)]"
+          style={{ maxWidth: "var(--bk-page-max)" }}
+        >
+          {children}
+        </div>
+      </main>
     </div>
   )
 }

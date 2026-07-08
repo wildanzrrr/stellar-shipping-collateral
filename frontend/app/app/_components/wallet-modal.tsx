@@ -61,7 +61,7 @@ export function WalletModal({
         <DialogClose asChild>
           <Button
             variant="destructive"
-            onClick={() => signOut({ callbackUrl: "/" })}
+            onClick={() => signOut({ callbackUrl: "/app/auth" })}
           >
             Log out
           </Button>
