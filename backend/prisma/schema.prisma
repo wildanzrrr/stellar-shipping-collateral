@@ -17,34 +17,34 @@ enum UserRole {
 
 // KYC verification status — sourced from Sumsub webhook events.
 enum KycStatus {
-  NOT_STARTED   // no applicant created yet
-  INIT          // applicant created, verification not started
-  PENDING       // documents uploaded, awaiting review
-  COMPLETED     // verification passed (reviewAnswer = GREEN)
-  REJECTED      // verification failed / resubmission requested (reviewAnswer = RED)
-  ON_HOLD       // review paused
+  NOT_STARTED // no applicant created yet
+  INIT // applicant created, verification not started
+  PENDING // documents uploaded, awaiting review
+  COMPLETED // verification passed (reviewAnswer = GREEN)
+  REJECTED // verification failed / resubmission requested (reviewAnswer = RED)
+  ON_HOLD // review paused
 }
 
 model User {
-  id            String        @id @default(cuid())
-  username      String        @unique
-  email         String        @unique
-  firstName     String?
-  lastName      String?
-  role          UserRole      @default(INVESTOR)
-  dfnsUserId    String?       @unique
-  userAuthToken String?
+  id               String        @id @default(cuid())
+  username         String        @unique
+  email            String        @unique
+  firstName        String?
+  lastName         String?
+  role             UserRole      @default(INVESTOR)
+  dfnsUserId       String?       @unique
+  userAuthToken    String?
   // SHA-256 hash of the currently-valid refresh token (rotation / revocation).
   refreshTokenHash String?
-  wallet        Wallet?
-  signSession   SignSession[]
+  wallet           Wallet?
+  signSession      SignSession[]
 
   // --- KYC (Sumsub) ---
   // New users are NOT verified regardless of role. This is only set to
   // COMPLETED once Sumsub's applicantReviewed webhook confirms reviewAnswer
   // GREEN. Gates access to the full app until KYC is done.
-  kycStatus       KycStatus  @default(NOT_STARTED)
-  sumsubApplicantId String?  @unique
+  kycStatus            KycStatus @default(NOT_STARTED)
+  sumsubApplicantId    String?   @unique
   sumsubExternalUserId String? // mirrors our user id for Sumsub lookups
 
   createdAt DateTime  @default(now())

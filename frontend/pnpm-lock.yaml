@@ -23,6 +23,9 @@ importers:
       '@stellar/stellar-sdk':
         specifier: ^16.0.1
         version: 16.0.1
+      '@sumsub/websdk-react':
+        specifier: ^2.6.3
+        version: 2.6.3(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@tanstack/react-query':
         specifier: ^5.101.2
         version: 5.101.2(react@19.2.4)
@@ -1353,6 +1356,12 @@ packages:
     resolution: {integrity: sha512-bxKohaiyKVqoudRhbOOHeHhHIaeYV5Zab4rCjxhP4Ty1h1ozTLBOv8lWFnZz9ilBzXG8Bb7usQI3rlEcfvUynA==}
     engines: {node: '>=22.0.0'}
     hasBin: true
+
+  '@sumsub/websdk-react@2.6.3':
+    resolution: {integrity: sha512-j9D9UQ1n5CPquqjhVTc/mCpQSA1cL/0ASLKwbncC7Wqvi8FEtbJmzWHlAF91rlT1iqPtM/mD05Rmax5SQDKUrA==}
+    peerDependencies:
+      react: '>=16.8.0'
+      react-dom: '>=16.8.0'
 
   '@swc/helpers@0.5.15':
     resolution: {integrity: sha512-JQ5TuMi45Owi4/BIMAJBoSQoOJu12oOk/gADqlcUL9JEdHB8vyjUSsxqeNXnmXHjYKMi2WcYtezGEEhqUI/E2g==}
@@ -5273,6 +5282,11 @@ snapshots:
     transitivePeerDependencies:
       - debug
       - supports-color
+
+  '@sumsub/websdk-react@2.6.3(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+    dependencies:
+      react: 19.2.4
+      react-dom: 19.2.4(react@19.2.4)
 
   '@swc/helpers@0.5.15':
     dependencies:

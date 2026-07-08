@@ -48,6 +48,7 @@ export function useAuthFlow() {
       email: result.user.email,
       userId: result.user.id,
       role: result.user.role,
+      kycStatus: result.user.kycStatus,
       firstName: result.user.firstName ?? "",
       lastName: result.user.lastName ?? "",
       walletId: result.user.walletId ?? "",

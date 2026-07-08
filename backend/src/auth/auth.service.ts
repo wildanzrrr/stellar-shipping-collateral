@@ -304,6 +304,7 @@ export class AuthService {
       sub: user.id,
       email: user.email,
       role: user.role,
+      kycStatus: user.kycStatus,
       walletId: wallet?.dfnsWalletId,
       walletAddress: wallet?.address,
     };
@@ -341,6 +342,7 @@ export class AuthService {
       id: user.id,
       email: user.email,
       role: user.role,
+      kycStatus: user.kycStatus,
       firstName: user.firstName,
       lastName: user.lastName,
       walletId: wallet?.dfnsWalletId ?? null,

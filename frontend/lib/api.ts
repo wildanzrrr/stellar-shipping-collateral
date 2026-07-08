@@ -48,10 +48,23 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   SHIPPING_COMPANY: "Shipping Company",
 }
 
+export type KycStatus =
+  "NOT_STARTED" | "INIT" | "PENDING" | "COMPLETED" | "REJECTED" | "ON_HOLD"
+
+export const KYC_STATUS_LABELS: Record<KycStatus, string> = {
+  NOT_STARTED: "Not started",
+  INIT: "In progress",
+  PENDING: "Pending review",
+  COMPLETED: "Verified",
+  REJECTED: "Rejected",
+  ON_HOLD: "On hold",
+}
+
 export interface PublicUser {
   id: string
   email: string
   role: UserRole
+  kycStatus: KycStatus
   firstName?: string | null
   lastName?: string | null
   walletId?: string | null
@@ -217,5 +230,26 @@ export const walletApi = {
         challengeIdentifier: args.challengeIdentifier,
         firstFactor: args.firstFactor,
       }),
+    }),
+}
+
+// ---- sumsub KYC (protected — pass the session access token) ----
+
+export interface SumsubAccessToken {
+  token: string
+  userId: string
+  applicantId?: string
+}
+
+export const sumsubApi = {
+  getAccessToken: (
+    accessToken: string,
+    sessionId?: string,
+    applicantId?: string
+  ) =>
+    req<SumsubAccessToken>("/sumsub/access-token", {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify({ sessionId, applicantId }),
     }),
 }

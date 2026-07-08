@@ -38,6 +38,7 @@ export class JwtAuthGuard implements CanActivate {
         sub: payload.sub,
         email: payload.email,
         role: payload.role,
+        kycStatus: payload.kycStatus,
         walletId: payload.walletId,
         walletAddress: payload.walletAddress,
       };

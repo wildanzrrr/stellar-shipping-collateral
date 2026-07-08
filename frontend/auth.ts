@@ -47,6 +47,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         email: {},
         userId: {},
         role: {},
+        kycStatus: {},
         firstName: {},
         lastName: {},
         walletId: {},
@@ -63,7 +64,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           id: (credentials.userId as string) || (credentials.email as string),
           email: credentials.email as string,
           name: [firstName, lastName].filter(Boolean).join(" ") || null,
-          role: (credentials.role as "INVESTOR" | "SHIPPING_COMPANY") || undefined,
+          role:
+            (credentials.role as "INVESTOR" | "SHIPPING_COMPANY") || undefined,
+          kycStatus:
+            (credentials.kycStatus as
+              | "NOT_STARTED"
+              | "INIT"
+              | "PENDING"
+              | "COMPLETED"
+              | "REJECTED"
+              | "ON_HOLD") || "NOT_STARTED",
           firstName,
           lastName,
           walletId: (credentials.walletId as string) || null,
@@ -84,6 +94,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.refreshToken = user.refreshToken
         token.accessTokenExpires = user.accessTokenExpires
         token.role = user.role
+        token.kycStatus = user.kycStatus
         token.firstName = user.firstName
         token.lastName = user.lastName
         token.walletId = user.walletId
@@ -108,6 +119,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (session.user) {
         if (token.sub) session.user.id = token.sub
         session.user.role = token.role
+        session.user.kycStatus = token.kycStatus
         session.user.firstName = token.firstName
         session.user.lastName = token.lastName
         session.user.walletId = token.walletId

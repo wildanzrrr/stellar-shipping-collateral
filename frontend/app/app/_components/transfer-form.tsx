@@ -80,9 +80,7 @@ export function TransferForm({
       return
     }
     // Trim trailing zeros but keep at least the integer part + no trailing dot.
-    const formatted = amount
-      .toFixed(7)
-      .replace(/\.?0+$/, "")
+    const formatted = amount.toFixed(7).replace(/\.?0+$/, "")
     form.setValue("amount", formatted, { shouldValidate: true })
   }
 

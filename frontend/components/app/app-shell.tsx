@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
 
 import { AppNavbar } from "@/app/app/_components/app-navbar"
+import { KycBanner } from "@/components/app/kyc-banner"
 
 /**
  * Authenticated shell: gates /app/* behind a session, renders the top navbar
@@ -32,6 +33,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-svh flex-col">
       <AppNavbar accessToken={accessToken} />
+      <KycBanner />
       <main className="flex-1">
         <div
           className="mx-auto px-[var(--bk-gutter)]"
