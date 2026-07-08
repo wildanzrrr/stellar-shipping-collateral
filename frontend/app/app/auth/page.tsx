@@ -3,11 +3,12 @@
 import { Suspense, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { signIn } from "next-auth/react"
+import { useMutation } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { webauthn } from "@/lib/dfns"
-import { authApi, ROLE_LABELS, type AuthResult, type UserRole } from "@/lib/api"
+import { authApi, ROLE_LABELS, type UserRole } from "@/lib/api"
 
 type Mode = "login" | "register"
 
@@ -23,19 +24,20 @@ function AuthInner() {
   const [role, setRole] = useState<UserRole>("INVESTOR")
   const [firstName, setFirstName] = useState("")
   const [lastName, setLastName] = useState("")
-  const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState("")
 
   // DFNS login ceremony -> BE issues JWTs -> establish NextAuth session.
   async function completeLogin(userEmail: string) {
     setStatus("Requesting login challenge…")
-    const init: any = await authApi.loginInit(userEmail)
+    const init = await authApi.loginInit(userEmail)
 
     setStatus("Sign in with your passkey…")
-    const firstFactor = await webauthn.sign(init)
+    const firstFactor = await webauthn.sign(
+      init as unknown as Parameters<typeof webauthn.sign>[0],
+    )
 
     setStatus("Verifying…")
-    const result: AuthResult = await authApi.loginComplete({
+    const result = await authApi.loginComplete({
       email: userEmail,
       challengeIdentifier: init.challengeIdentifier,
       firstFactor,
@@ -48,6 +50,8 @@ function AuthInner() {
       role: result.user.role,
       firstName: result.user.firstName ?? "",
       lastName: result.user.lastName ?? "",
+      walletId: result.user.walletId ?? "",
+      walletAddress: result.user.walletAddress ?? "",
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
       expiresIn: String(result.expiresIn),
@@ -60,58 +64,64 @@ function AuthInner() {
     router.refresh()
   }
 
-  async function handleLogin() {
-    const e = email.trim()
-    if (!e) return
-    setBusy(true)
-    try {
-      await completeLogin(e)
-    } catch (err: any) {
-      toast.error(err?.message ?? "Login failed")
-      setStatus("")
-    } finally {
-      setBusy(false)
+  // Register: create the DFNS user + passkey, provision the wallet on the BE,
+  // then complete the passkey login to mint tokens.
+  async function registerFlow(userEmail: string) {
+    setStatus("Checking your account…")
+    const regInit = await authApi.registerInit({
+      email: userEmail,
+      role,
+      firstName: firstName.trim() || undefined,
+      lastName: lastName.trim() || undefined,
+    })
+
+    if ("alreadyRegistered" in regInit) {
+      setStatus("Account exists — signing you in…")
+      await completeLogin(userEmail)
+      return
     }
+
+    setStatus("Create a passkey (Touch ID / security key)…")
+    const attestation = await webauthn.create(
+      regInit as unknown as Parameters<typeof webauthn.create>[0],
+    )
+
+    setStatus("Finishing registration…")
+    await authApi.registerComplete({
+      email: userEmail,
+      temporaryAuthenticationToken: regInit.temporaryAuthenticationToken,
+      firstFactorCredential: attestation,
+    })
+
+    await completeLogin(userEmail)
   }
 
-  async function handleRegister() {
-    const e = email.trim()
-    if (!e) return
-    setBusy(true)
-    try {
-      setStatus("Checking your account…")
-      const regInit: any = await authApi.registerInit({
-        email: e,
-        role,
-        firstName: firstName.trim() || undefined,
-        lastName: lastName.trim() || undefined,
-      })
-
-      if (regInit?.alreadyRegistered) {
-        // Account exists — fall through to the passkey login.
-        setStatus("Account exists — signing you in…")
-        await completeLogin(e)
-        return
-      }
-
-      setStatus("Create a passkey (Touch ID / security key)…")
-      const attestation = await webauthn.create(regInit)
-
-      setStatus("Finishing registration…")
-      await authApi.registerComplete({
-        email: e,
-        temporaryAuthenticationToken: regInit.temporaryAuthenticationToken,
-        firstFactorCredential: attestation,
-      })
-
-      // Freshly registered — now log in to mint tokens + session.
-      await completeLogin(e)
-    } catch (err: any) {
-      toast.error(err?.message ?? "Registration failed")
+  const loginMutation = useMutation({
+    mutationFn: completeLogin,
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Login failed")
       setStatus("")
-    } finally {
-      setBusy(false)
-    }
+    },
+  })
+
+  const registerMutation = useMutation({
+    mutationFn: registerFlow,
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Registration failed")
+      setStatus("")
+    },
+  })
+
+  const busy = loginMutation.isPending || registerMutation.isPending
+
+  function handleLogin() {
+    const e = email.trim()
+    if (e) loginMutation.mutate(e)
+  }
+
+  function handleRegister() {
+    const e = email.trim()
+    if (e) registerMutation.mutate(e)
   }
 
   return (

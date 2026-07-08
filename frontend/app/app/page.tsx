@@ -3,13 +3,12 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useSession, signOut } from "next-auth/react"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { webauthn } from "@/lib/dfns"
-import { walletApi, ROLE_LABELS, type UserRole } from "@/lib/api"
-
-type WalletInfo = { id: string; address: string; network: string }
+import { authApi, walletApi, ROLE_LABELS, type UserRole } from "@/lib/api"
 
 // Role-specific dashboard intro. This is where the two experiences diverge —
 // extend each branch as the Investor / Shipping Company surfaces are built out.
@@ -43,83 +42,69 @@ export default function AppDashboard() {
   const router = useRouter()
   const { data: session, status } = useSession()
 
-  const [busy, setBusy] = useState(false)
-  const [statusMsg, setStatusMsg] = useState("")
-  const [wallet, setWallet] = useState<WalletInfo | null>(null)
   const [message, setMessage] = useState("Hello from Stellar via DFNS!")
   const [signature, setSignature] = useState("")
+  const [statusMsg, setStatusMsg] = useState("")
+
+  const accessToken = session?.accessToken ?? ""
+  const email = session?.user?.email ?? ""
 
   // Defense-in-depth: middleware already gates this route.
   useEffect(() => {
     if (status === "unauthenticated") router.replace("/app/auth")
   }, [status, router])
 
-  if (status !== "authenticated" || !session?.user?.email) {
+  // Authoritative user + wallet (created & friendbot-funded at registration).
+  const meQuery = useQuery({
+    queryKey: ["me"],
+    queryFn: () => authApi.me(accessToken),
+    enabled: status === "authenticated" && Boolean(accessToken),
+  })
+
+  const walletId = meQuery.data?.walletId ?? session?.user?.walletId ?? null
+  const walletAddress =
+    meQuery.data?.walletAddress ?? session?.user?.walletAddress ?? null
+  const role = meQuery.data?.role ?? session?.user?.role
+
+  async function signFlow(msg: string) {
+    if (!walletId) throw new Error("Your wallet is still being set up")
+
+    setStatusMsg("Creating signing challenge…")
+    const init = await walletApi.signInit(accessToken, email, walletId, msg)
+
+    setStatusMsg("Sign the challenge with your passkey…")
+    const firstFactor = await webauthn.sign(
+      init as unknown as Parameters<typeof webauthn.sign>[0],
+    )
+
+    setStatusMsg("Submitting signed challenge…")
+    const result = await walletApi.signComplete(accessToken, {
+      username: email,
+      walletId,
+      challengeIdentifier: init.challengeIdentifier,
+      firstFactor,
+    })
+
+    const sig = result.signature ?? result.signedTransaction ?? result
+    setSignature(typeof sig === "string" ? sig : JSON.stringify(sig, null, 2))
+    setStatusMsg("")
+    toast.success("Message signed")
+  }
+
+  const signMutation = useMutation({
+    mutationFn: signFlow,
+    onError: (err) => {
+      setStatusMsg("")
+      toast.error(err instanceof Error ? err.message : "Could not sign message")
+    },
+  })
+
+  if (status !== "authenticated" || !email) {
     return (
       <div className="flex min-h-svh items-center justify-center text-sm text-muted-foreground">
         Loading…
       </div>
     )
-  }
-
-  const email = session.user.email
-  const role = session.user.role
-  const accessToken = session.accessToken as string
-
-  async function handleCreateWallet() {
-    setBusy(true)
-    setStatusMsg("")
-    try {
-      setStatusMsg("Creating Stellar Testnet wallet…")
-      const w: WalletInfo = await walletApi.createWallet(accessToken, email)
-      setStatusMsg("Delegating wallet to you…")
-      await walletApi.delegateWallet(accessToken, email, w.id)
-      setWallet(w)
-      setStatusMsg("")
-      toast.success("Wallet created and delegated")
-    } catch (e: any) {
-      setStatusMsg("")
-      toast.error(e?.message ?? "Could not create wallet")
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function handleSignMessage() {
-    if (!wallet) return
-    setBusy(true)
-    setStatusMsg("")
-    setSignature("")
-    try {
-      setStatusMsg("Creating signing challenge…")
-      const init: any = await walletApi.signInit(
-        accessToken,
-        email,
-        wallet.id,
-        message,
-      )
-
-      setStatusMsg("Sign the challenge with your passkey…")
-      const firstFactor = await webauthn.sign(init)
-
-      setStatusMsg("Submitting signed challenge…")
-      const result: any = await walletApi.signComplete(accessToken, {
-        username: email,
-        walletId: wallet.id,
-        challengeIdentifier: init.challengeIdentifier,
-        firstFactor,
-      })
-
-      const sig = result?.signature ?? result?.signedTransaction ?? result
-      setSignature(typeof sig === "string" ? sig : JSON.stringify(sig, null, 2))
-      setStatusMsg("")
-      toast.success("Message signed")
-    } catch (e: any) {
-      setStatusMsg("")
-      toast.error(e?.message ?? "Could not sign message")
-    } finally {
-      setBusy(false)
-    }
   }
 
   return (
@@ -147,21 +132,23 @@ export default function AppDashboard() {
 
         <RolePanel role={role} />
 
-        <div className="flex gap-2">
-          <Button onClick={handleCreateWallet} disabled={busy}>
-            {wallet ? "Wallet ready" : "Create wallet"}
-          </Button>
+        <div className="rounded border p-3 font-mono text-xs">
+          <div className="mb-1 font-sans font-medium">Your Stellar wallet</div>
+          {meQuery.isLoading && !walletId ? (
+            <div>Loading…</div>
+          ) : walletId ? (
+            <>
+              <div>id: {walletId}</div>
+              <div>address: {walletAddress}</div>
+            </>
+          ) : (
+            <div className="font-sans text-muted-foreground">
+              Wallet is still being provisioned — refresh in a moment.
+            </div>
+          )}
         </div>
 
-        {wallet && (
-          <div className="rounded border p-3 font-mono text-xs">
-            <div>id: {wallet.id}</div>
-            <div>network: {wallet.network}</div>
-            <div>address: {wallet.address}</div>
-          </div>
-        )}
-
-        {wallet && (
+        {walletId && (
           <div className="flex flex-col gap-2">
             <label className="text-xs text-muted-foreground" htmlFor="message">
               Message to sign
@@ -172,8 +159,11 @@ export default function AppDashboard() {
               value={message}
               onChange={(e) => setMessage(e.target.value)}
             />
-            <Button onClick={handleSignMessage} disabled={busy}>
-              Sign message
+            <Button
+              onClick={() => signMutation.mutate(message)}
+              disabled={signMutation.isPending}
+            >
+              {signMutation.isPending ? "Signing…" : "Sign message"}
             </Button>
           </div>
         )}

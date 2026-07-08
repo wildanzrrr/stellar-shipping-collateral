@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 
 import { createMetadata } from "@/lib/seo"
 import { AuthSessionProvider } from "@/components/session-provider"
+import { QueryProvider } from "@/components/query-provider"
 
 // The /app surface is the authenticated product (wallet dashboard + auth).
 // Kept out of search results; access is gated by middleware.
@@ -16,5 +17,9 @@ export const metadata: Metadata = createMetadata({
 export default function AppLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  return <AuthSessionProvider>{children}</AuthSessionProvider>
+  return (
+    <AuthSessionProvider>
+      <QueryProvider>{children}</QueryProvider>
+    </AuthSessionProvider>
+  )
 }

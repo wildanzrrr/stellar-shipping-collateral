@@ -49,6 +49,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         role: {},
         firstName: {},
         lastName: {},
+        walletId: {},
+        walletAddress: {},
         accessToken: {},
         refreshToken: {},
         expiresIn: {},
@@ -64,6 +66,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           role: (credentials.role as "INVESTOR" | "SHIPPING_COMPANY") || undefined,
           firstName,
           lastName,
+          walletId: (credentials.walletId as string) || null,
+          walletAddress: (credentials.walletAddress as string) || null,
           accessToken: credentials.accessToken as string,
           refreshToken: credentials.refreshToken as string,
           accessTokenExpires:
@@ -82,6 +86,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.role = user.role
         token.firstName = user.firstName
         token.lastName = user.lastName
+        token.walletId = user.walletId
+        token.walletAddress = user.walletAddress
         return token
       }
 
@@ -104,6 +110,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         session.user.role = token.role
         session.user.firstName = token.firstName
         session.user.lastName = token.lastName
+        session.user.walletId = token.walletId
+        session.user.walletAddress = token.walletAddress
       }
       return session
     },

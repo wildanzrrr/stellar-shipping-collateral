@@ -10,6 +10,8 @@ declare module "next-auth" {
       role?: UserRole
       firstName?: string | null
       lastName?: string | null
+      walletId?: string | null
+      walletAddress?: string | null
     } & DefaultSession["user"]
   }
 
@@ -20,6 +22,8 @@ declare module "next-auth" {
     role?: UserRole
     firstName?: string | null
     lastName?: string | null
+    walletId?: string | null
+    walletAddress?: string | null
   }
 }
 
@@ -31,6 +35,8 @@ declare module "next-auth/jwt" {
     role?: UserRole
     firstName?: string | null
     lastName?: string | null
+    walletId?: string | null
+    walletAddress?: string | null
     error?: "RefreshTokenError"
   }
 }

@@ -3,7 +3,12 @@
 // helpers below unwrap `.data` for callers.
 const base = `${process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:2000"}/api/v1`
 
-type Wrapped<T> = { success: boolean; message: string; data: T; statusCode: number }
+interface Wrapped<T> {
+  success: boolean
+  message: string
+  data: T
+  statusCode: number
+}
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`${base}${path}`, {
@@ -14,24 +19,27 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     },
   })
   if (!r.ok) {
-    let msg = `${r.status}`
+    let message = `${r.status}`
     try {
-      const body = await r.json()
-      msg = body?.message ?? JSON.stringify(body)
+      const body: unknown = await r.json()
+      if (body && typeof body === "object" && "message" in body) {
+        const m = (body as { message: unknown }).message
+        message = Array.isArray(m) ? m.join(", ") : String(m)
+      }
     } catch {
-      msg = `${r.status} ${await r.text()}`
+      message = `${r.status} ${await r.text()}`
     }
-    throw new Error(Array.isArray(msg) ? msg.join(", ") : msg)
+    throw new Error(message)
   }
   const json = (await r.json()) as Wrapped<T>
-  return (json?.data ?? json) as T
+  return (json?.data ?? (json as unknown as T)) as T
 }
 
 function bearer(accessToken: string): HeadersInit {
   return { Authorization: `Bearer ${accessToken}` }
 }
 
-// ---- auth (email + DFNS passkey -> app JWTs) ----
+// ---- shared types ----
 
 export type UserRole = "INVESTOR" | "SHIPPING_COMPANY"
 
@@ -40,20 +48,59 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   SHIPPING_COMPANY: "Shipping Company",
 }
 
-export type PublicUser = {
+export interface PublicUser {
   id: string
   email: string
   role: UserRole
   firstName?: string | null
   lastName?: string | null
+  walletId?: string | null
+  walletAddress?: string | null
 }
 
-export type AuthResult = {
+export interface AuthResult {
   accessToken: string
   refreshToken: string
   expiresIn: number
   user: PublicUser
 }
+
+export interface RegistrationChallenge {
+  temporaryAuthenticationToken: string
+  challenge: string
+  [key: string]: unknown
+}
+
+export interface AlreadyRegistered {
+  alreadyRegistered: true
+}
+
+export type RegisterInitResult = RegistrationChallenge | AlreadyRegistered
+
+export interface LoginChallenge {
+  challengeIdentifier: string
+  challenge: string
+  [key: string]: unknown
+}
+
+export interface WalletInfo {
+  id: string
+  address: string
+  network: string
+}
+
+export interface SignChallenge {
+  challengeIdentifier: string
+  [key: string]: unknown
+}
+
+export interface SignResult {
+  signature?: string
+  signedTransaction?: string
+  [key: string]: unknown
+}
+
+// ---- auth (email + DFNS passkey -> app JWTs) ----
 
 export const authApi = {
   registerInit: (body: {
@@ -62,7 +109,7 @@ export const authApi = {
     firstName?: string
     lastName?: string
   }) =>
-    req<any>("/auth/register/init", {
+    req<RegisterInitResult>("/auth/register/init", {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -71,12 +118,12 @@ export const authApi = {
     temporaryAuthenticationToken: string
     firstFactorCredential: unknown
   }) =>
-    req<any>("/auth/register/complete", {
+    req<{ registered: boolean }>("/auth/register/complete", {
       method: "POST",
       body: JSON.stringify(body),
     }),
   loginInit: (email: string) =>
-    req<any>("/auth/login/init", {
+    req<LoginChallenge>("/auth/login/init", {
       method: "POST",
       body: JSON.stringify({ email }),
     }),
@@ -89,19 +136,21 @@ export const authApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  me: (accessToken: string) =>
+    req<PublicUser>("/auth/me", { headers: bearer(accessToken) }),
 }
 
 // ---- wallets (protected — pass the session access token) ----
 
 export const walletApi = {
   createWallet: (accessToken: string, username: string) =>
-    req<any>("/wallets", {
+    req<WalletInfo>("/wallets", {
       method: "POST",
       headers: bearer(accessToken),
       body: JSON.stringify({ username }),
     }),
   delegateWallet: (accessToken: string, username: string, walletId: string) =>
-    req<any>(`/wallets/${walletId}/delegate`, {
+    req<unknown>(`/wallets/${walletId}/delegate`, {
       method: "POST",
       headers: bearer(accessToken),
       body: JSON.stringify({ username }),
@@ -112,7 +161,7 @@ export const walletApi = {
     walletId: string,
     message: string,
   ) =>
-    req<any>(`/wallets/${walletId}/sign/init`, {
+    req<SignChallenge>(`/wallets/${walletId}/sign/init`, {
       method: "POST",
       headers: bearer(accessToken),
       body: JSON.stringify({ username, message }),
@@ -126,7 +175,7 @@ export const walletApi = {
       firstFactor: unknown
     },
   ) =>
-    req<any>(`/wallets/${args.walletId}/sign/complete`, {
+    req<SignResult>(`/wallets/${args.walletId}/sign/complete`, {
       method: "POST",
       headers: bearer(accessToken),
       // walletId travels in the URL — keep it out of the body (whitelist).
