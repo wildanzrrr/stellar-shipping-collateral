@@ -1,0 +1,219 @@
+# SEP57 Frontend — Authentication
+
+Authentication for the Next.js app: **NextAuth (Auth.js v5) wrapping backend-issued JWTs**, protecting the `/app` surface. The DFNS passkey ceremony runs in the browser; the backend returns access + refresh tokens; NextAuth stores them in its session and auto-refreshes them. API calls go through **TanStack Query**.
+
+## Table of Contents
+
+- [Overview](#overview)
+- [File Map](#file-map)
+- [Routes & Protection](#routes--protection)
+- [NextAuth Configuration](#nextauth-configuration)
+- [The Auth Flow (client)](#the-auth-flow-client)
+- [Auth Page Building Blocks](#auth-page-building-blocks)
+- [API Client](#api-client)
+- [TanStack Query](#tanstack-query)
+- [Session & Wallet in the Dashboard](#session--wallet-in-the-dashboard)
+- [Toasts](#toasts)
+- [Environment](#environment)
+- [Notes & Gotchas](#notes--gotchas)
+
+---
+
+## Overview
+
+The DFNS passkey ceremony must run in the browser (WebAuthn), so it cannot happen inside NextAuth's server-side `authorize()`. The flow is therefore:
+
+```
+browser: passkey ceremony ──▶ BE returns { accessToken, refreshToken, user }
+        └─▶ signIn("dfns", {...tokens}) ──▶ NextAuth session (JWT strategy) stores them
+                                          └─▶ proxy middleware gates /app
+```
+
+| Concern | Choice |
+| --- | --- |
+| Session library | `next-auth@5` (Auth.js v5, Credentials provider) |
+| Session storage | Encrypted JWT cookie (holds BE access + refresh tokens) |
+| Token refresh | Automatic in the `jwt` callback → BE `/auth/refresh` |
+| Route guard | `proxy.ts` (Next 16's `middleware` replacement) |
+| Data fetching | `@tanstack/react-query` |
+| Toasts | `sonner`, top-right |
+
+---
+
+## File Map
+
+```
+frontend/
+├── auth.ts                               # NextAuth config (handlers, auth, signIn, signOut)
+├── proxy.ts                              # route guard for /app/* (was middleware.ts)
+├── types/next-auth.d.ts                  # Session / User / JWT augmentation
+├── app/
+│   ├── layout.tsx                        # mounts <Toaster /> (top-right)
+│   ├── api/auth/[...nextauth]/route.ts   # NextAuth route handler (GET/POST)
+│   └── app/
+│       ├── layout.tsx                    # SessionProvider + QueryProvider (protected shell)
+│       ├── page.tsx                      # role-aware dashboard (wallet + sign)
+│       └── auth/
+│           ├── page.tsx                  # thin: <Suspense><AuthPanel/></Suspense>
+│           └── _components/              # building blocks (below)
+├── components/
+│   ├── session-provider.tsx              # "use client" SessionProvider wrapper
+│   ├── query-provider.tsx                # "use client" QueryClientProvider
+│   └── ui/sonner.tsx                     # Toaster (position="top-right")
+└── lib/
+    ├── api.ts                            # typed BE client (authApi + walletApi)
+    └── dfns.ts                           # WebAuthnSigner (passkey)
+```
+
+---
+
+## Routes & Protection
+
+- `/` — public landing page.
+- `/app` — authenticated dashboard.
+- `/app/auth` — sign in / create account.
+
+[`proxy.ts`](../proxy.ts) (matcher `["/app/:path*"]`) wraps `auth`:
+
+- Unauthenticated request to `/app/*` (except `/app/auth`) → redirect to `/app/auth?callbackUrl=<path>`.
+- Authenticated request to `/app/auth` → redirect to `/app`.
+
+> Next 16 deprecated `middleware.ts` in favor of **`proxy.ts`** (same API, default export). It shows as `ƒ Proxy (Middleware)` in the build output.
+
+The `/app` layout also wraps children in `SessionProvider` + `QueryProvider`, and `/app/page.tsx` redirects to `/app/auth` if `status === "unauthenticated"` (defense-in-depth).
+
+---
+
+## NextAuth Configuration
+
+[`auth.ts`](../auth.ts) — Credentials provider `id: "dfns"`, `session.strategy: "jwt"`, `pages.signIn: "/app/auth"`.
+
+**`authorize`** — the passkey ceremony has already produced tokens by the time we get here; it just validates and forwards them into the session (email + accessToken required):
+
+```ts
+signIn("dfns", {
+  email, userId, role, firstName, lastName,
+  walletId, walletAddress,
+  accessToken, refreshToken, expiresIn,   // from BE /auth/login/complete
+  redirect: false,
+})
+```
+
+**`jwt` callback** — seeds the token on first sign-in; on later calls reuses it while valid (30s safety margin) or calls `refreshAccessToken()` → BE `/auth/refresh` to rotate. On failure it sets `token.error = "RefreshTokenError"`.
+
+**`session` callback** — exposes `session.accessToken`, `session.error`, and `session.user` = `{ id, role, firstName, lastName, walletId, walletAddress, name, email }`.
+
+Types are augmented in [`types/next-auth.d.ts`](../types/next-auth.d.ts) for `Session`, `User`, and `JWT`.
+
+The route handler is a one-liner:
+
+```ts
+// app/api/auth/[...nextauth]/route.ts
+export const { GET, POST } = handlers
+```
+
+---
+
+## The Auth Flow (client)
+
+All ceremony + mutation logic lives in the [`useAuthFlow`](../app/app/auth/_components/use-auth-flow.ts) hook.
+
+**Login** (`completeLogin`):
+1. `authApi.loginInit(email)` → challenge.
+2. `webauthn.sign(challenge)` → passkey assertion.
+3. `authApi.loginComplete({ email, challengeIdentifier, firstFactor })` → tokens + user.
+4. `signIn("dfns", {...})` → NextAuth session, then `router.push(callbackUrl)`.
+
+**Register** (`registerFlow`):
+1. `authApi.registerInit({ email, role, firstName?, lastName? })`.
+2. If `{ alreadyRegistered }` → fall through to the login ceremony.
+3. `webauthn.create(challenge)` → passkey attestation.
+4. `authApi.registerComplete({ email, temporaryAuthenticationToken, firstFactorCredential })` — the BE provisions the wallet here.
+5. `completeLogin(email)` → tokens + session.
+
+Both are wrapped in `useMutation`; `busy = loginMutation.isPending || registerMutation.isPending`, and a human-readable `status` string walks each passkey step. Errors surface as toasts.
+
+---
+
+## Auth Page Building Blocks
+
+`app/app/auth/page.tsx` is intentionally thin — it only provides the `Suspense` boundary that `useSearchParams` needs and renders the orchestrator. Everything else is composed from `_components/`:
+
+| File | Responsibility |
+| --- | --- |
+| [`auth-panel.tsx`](../app/app/auth/_components/auth-panel.tsx) | Orchestrator: mode state, header, tabs, form, status |
+| [`mode-tabs.tsx`](../app/app/auth/_components/mode-tabs.tsx) | Sign in / Create account toggle |
+| [`auth-form.tsx`](../app/app/auth/_components/auth-form.tsx) | Email + (role + names in register mode) + submit; owns field state |
+| [`role-select.tsx`](../app/app/auth/_components/role-select.tsx) | Investor / Shipping Company picker |
+| [`use-auth-flow.ts`](../app/app/auth/_components/use-auth-flow.ts) | Passkey ceremonies + TanStack mutations + `status` (behavior, not UI) |
+| [`types.ts`](../app/app/auth/_components/types.ts) | `Mode` + `AuthFormValues` |
+
+Rationale: visual blocks (`AuthForm`, `ModeTabs`, `RoleSelect`) stay pure and reusable; the DFNS/session logic is isolated in a hook. `page.tsx` is a server component (no `"use client"`).
+
+---
+
+## API Client
+
+[`lib/api.ts`](../lib/api.ts) targets `${NEXT_PUBLIC_BACKEND_URL}/api/v1` and unwraps the BE's `{ data }` envelope. It surfaces validation-error arrays as a joined message. Fully typed (no `any`).
+
+- **`authApi`**: `registerInit`, `registerComplete`, `loginInit`, `loginComplete`, `me(accessToken)`.
+- **`walletApi`** (all send `Authorization: Bearer <accessToken>`): `createWallet`, `delegateWallet`, `signInit`, `signComplete`.
+
+Exports shared types (`UserRole`, `ROLE_LABELS`, `PublicUser`, `AuthResult`, `RegisterInitResult`, `LoginChallenge`, `WalletInfo`, `SignChallenge`, `SignResult`).
+
+---
+
+## TanStack Query
+
+[`components/query-provider.tsx`](../components/query-provider.tsx) creates one stable `QueryClient` (30s `staleTime`, `retry: 1`, no refetch-on-focus) and is mounted in the `/app` layout alongside `SessionProvider`.
+
+Usage:
+- Auth flows → `useMutation` (in `useAuthFlow`).
+- Dashboard current user/wallet → `useQuery(["me"], () => authApi.me(accessToken))`.
+- Message signing → `useMutation`.
+
+---
+
+## Session & Wallet in the Dashboard
+
+[`app/app/page.tsx`](../app/app/page.tsx) reads `useSession()` and a `useQuery(["me"])` (authoritative DB truth). The wallet is auto-provisioned at registration, so it arrives via the JWT/session **and** `me`:
+
+```ts
+const walletId = meQuery.data?.walletId ?? session?.user?.walletId ?? null
+const role     = meQuery.data?.role     ?? session?.user?.role
+```
+
+The page branches its intro by `role` (Investor vs Shipping Company), shows the wallet id/address, and lets the user sign a message (passkey) via a mutation. If the wallet isn't ready yet it shows a "still being provisioned" note.
+
+---
+
+## Toasts
+
+[`components/ui/sonner.tsx`](../components/ui/sonner.tsx) renders `<Toaster position="top-right" richColors />`, mounted once in the root [`app/layout.tsx`](../app/layout.tsx). All success/error feedback uses `toast.success` / `toast.error`; the auth form has **no inline error text** under the button.
+
+---
+
+## Environment
+
+Added to [`.env.example`](../.env.example) (real values in `.env`, gitignored):
+
+```env
+# NextAuth (Auth.js v5) — generate AUTH_SECRET with: openssl rand -base64 33
+AUTH_SECRET=
+AUTH_URL=http://localhost:3000
+AUTH_TRUST_HOST=true
+
+# Backend base URL
+NEXT_PUBLIC_BACKEND_URL=http://localhost:2000
+```
+
+(Plus the existing `NEXT_PUBLIC_DFNS_*` vars used by the browser passkey signer — see [`dfns.md`](./dfns.md).)
+
+---
+
+## Notes & Gotchas
+
+- **`useSearchParams` needs Suspense** — that's why `page.tsx` wraps `AuthPanel`; a component can't be both the `useSearchParams` consumer and its own `Suspense` boundary.
+- **Access token lives in the session cookie** — the `jwt` callback rotates it via the BE before expiry; `session.error === "RefreshTokenError"` signals a failed refresh (treat as signed-out).
+- **Wallet claims may be `null`** right after registration if provisioning hiccuped on the BE — the dashboard falls back to the `me` query and shows a provisioning note.
+- **No `any`** in touched code — DFNS challenge objects are cast with `Parameters<typeof webauthn.sign>[0]` rather than `any`.
