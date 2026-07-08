@@ -1,0 +1,83 @@
+/* Hallmark · tokens — Bunkr locked system · theme: studied-DNA (source: https://www.brainfishai.com/)
+ * paper oklch(99% 0.004 130) · accent oklch(84% 0.238 129) lime · display/body: Geist · label: Geist Mono
+ * studied: yes · DNA-source: url (public reference, attested 2026-07-08) · see design.md
+ */
+:root {
+  /* ── colour ─────────────────────────────────────────────── */
+  --bk-paper:      oklch(99% 0.004 130);
+  --bk-paper-2:    oklch(98.5% 0.012 122);
+  --bk-ink:        oklch(26% 0.006 130);
+  --bk-muted:      oklch(45% 0.008 130);
+  --bk-rule:       oklch(91% 0.006 130);
+  --bk-rule-soft:  oklch(94% 0.005 130);
+  --bk-accent:     oklch(84% 0.238 129);
+  --bk-accent-ink: oklch(32% 0.09 130);
+  --bk-support:    oklch(38% 0.19 294);
+  --bk-dark:       oklch(17% 0.012 130);
+  --bk-dark-2:     oklch(22% 0.014 130);
+  --bk-ink-on-dark:   oklch(95% 0.006 130);
+  --bk-muted-on-dark: oklch(74% 0.01 130);
+  --bk-rule-on-dark:  oklch(32% 0.012 130);
+  --bk-focus:      oklch(45% 0.17 294);
+
+  /* ── type ───────────────────────────────────────────────── */
+  --bk-font-display: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
+  --bk-font-body:    var(--font-sans, ui-sans-serif, system-ui, sans-serif);
+  --bk-font-mono:    var(--font-mono, ui-monospace, monospace);
+
+  --bk-text-xs:   0.8rem;
+  --bk-text-sm:   0.875rem;
+  --bk-text-base: 1rem;
+  --bk-text-md:   1.25rem;
+  --bk-text-lg:   1.5625rem;
+  --bk-text-xl:   1.9531rem;
+  --bk-text-2xl:  2.4414rem;
+  --bk-text-h2:      clamp(1.75rem, 2.2vw + 0.9rem, 2.5rem);
+  --bk-text-display: clamp(2.25rem, 3.2vw + 1.1rem, 3.5rem);
+
+  /* ── space (4-pt) ───────────────────────────────────────── */
+  --bk-space-3xs: 0.125rem;
+  --bk-space-2xs: 0.25rem;
+  --bk-space-xs:  0.5rem;
+  --bk-space-sm:  0.75rem;
+  --bk-space-md:  1rem;
+  --bk-space-lg:  1.5rem;
+  --bk-space-xl:  2.5rem;
+  --bk-space-2xl: 4rem;
+  --bk-space-3xl: 6rem;
+  --bk-space-4xl: 9rem;
+
+  /* ── motion ─────────────────────────────────────────────── */
+  --bk-ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --bk-ease-in:     cubic-bezier(0.7, 0, 0.84, 0);
+  --bk-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --bk-dur-micro: 120ms;
+  --bk-dur-short: 220ms;
+  --bk-dur-long:  420ms;
+
+  /* ── shape · depth · z ──────────────────────────────────── */
+  --bk-radius-btn:  4px;
+  --bk-radius-card: 6px;
+  --bk-shadow-offset: 2px 2px 0 var(--bk-ink);
+  --bk-page-max: 72rem;
+  --bk-gutter: clamp(1rem, 4vw, 2rem);
+  --bk-z-base: 1;
+  --bk-z-raised: 10;
+  --bk-z-sticky: 200;
+}
+
+/* Dark scheme — same hues, lightness/chroma move (next-themes `.dark` class). */
+.dark {
+  --bk-paper:      oklch(15% 0.01 130);
+  --bk-paper-2:    oklch(18% 0.012 130);
+  --bk-ink:        oklch(95% 0.006 130);
+  --bk-muted:      oklch(72% 0.008 130);
+  --bk-rule:       oklch(29% 0.01 130);
+  --bk-rule-soft:  oklch(24% 0.008 130);
+  --bk-accent:     oklch(82% 0.2 129);
+  --bk-accent-ink: oklch(28% 0.08 130); /* stays dark — sits on lime fills (gate 41) */
+  --bk-dark:       oklch(12% 0.01 130);
+  --bk-dark-2:     oklch(19% 0.013 130);
+  --bk-focus:      oklch(84% 0.238 129);
+  --bk-shadow-offset: 2px 2px 0 oklch(8% 0.008 130);
+}
