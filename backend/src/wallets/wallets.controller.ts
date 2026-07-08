@@ -15,6 +15,8 @@ import {
   DelegateWalletDTO,
   SignInitDTO,
   SignCompleteDTO,
+  TransferInitDTO,
+  TransferCompleteDTO,
 } from './wallets.dto';
 
 @ApiBearerAuth()
@@ -120,5 +122,41 @@ export class WalletsController {
     @Body() payload: SignCompleteDTO,
   ) {
     return this.walletsService.signComplete(walletId, payload);
+  }
+
+  @Post(':walletId/transfer/init')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Transfer (step 1)',
+    description:
+      'Builds a Stellar payment transaction and requests a passkey signing challenge.',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Transfer challenge created',
+  })
+  transferInit(
+    @Param('walletId') walletId: string,
+    @Body() payload: TransferInitDTO,
+  ) {
+    return this.walletsService.transferInit(walletId, payload);
+  }
+
+  @Post(':walletId/transfer/complete')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Transfer (step 2)',
+    description:
+      'Completes the passkey signature and broadcasts the payment to Stellar.',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Transfer broadcast successfully',
+  })
+  transferComplete(
+    @Param('walletId') walletId: string,
+    @Body() payload: TransferCompleteDTO,
+  ) {
+    return this.walletsService.transferComplete(walletId, payload);
   }
 }

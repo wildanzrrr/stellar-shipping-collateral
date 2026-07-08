@@ -31,10 +31,12 @@ export function AppNavbar({ accessToken }: { accessToken: string }) {
         <AppNavLogo />
         <AppNavMenu role={user?.role} />
         <WalletModal
+          accessToken={accessToken}
           email={user?.email ?? ""}
           role={user?.role}
           firstName={user?.firstName}
           lastName={user?.lastName}
+          walletId={user?.walletId ?? null}
           walletAddress={user?.walletAddress ?? null}
         />
       </div>

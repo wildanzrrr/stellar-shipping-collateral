@@ -9,7 +9,10 @@ import {
 import { UserRole } from 'prisma/generated/prisma/client';
 
 export class RegisterInitDTO {
-  @ApiProperty({ description: 'User email (identity)', example: 'alice@acme.io' })
+  @ApiProperty({
+    description: 'User email (identity)',
+    example: 'alice@acme.io',
+  })
   @IsEmail()
   @IsNotEmpty()
   email: string;

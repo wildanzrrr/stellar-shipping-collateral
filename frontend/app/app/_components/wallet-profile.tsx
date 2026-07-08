@@ -63,7 +63,7 @@ export function WalletProfile({
         <button
           type="button"
           onClick={handleCopy}
-          className="inline-flex items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          className="inline-flex cursor-pointer items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           aria-label="Copy wallet address"
         >
           {copied ? (

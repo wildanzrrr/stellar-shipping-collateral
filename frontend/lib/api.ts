@@ -174,7 +174,44 @@ export const walletApi = {
     req<SignResult>(`/wallets/${args.walletId}/sign/complete`, {
       method: "POST",
       headers: bearer(accessToken),
-      // walletId travels in the URL — keep it out of the body (whitelist).
+      body: JSON.stringify({
+        username: args.username,
+        challengeIdentifier: args.challengeIdentifier,
+        firstFactor: args.firstFactor,
+      }),
+    }),
+  transferInit: (
+    accessToken: string,
+    args: {
+      username: string
+      walletId: string
+      asset: "native" | "USDC"
+      destination: string
+      amount: number
+    }
+  ) =>
+    req<SignChallenge>(`/wallets/${args.walletId}/transfer/init`, {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify({
+        username: args.username,
+        asset: args.asset,
+        destination: args.destination,
+        amount: args.amount,
+      }),
+    }),
+  transferComplete: (
+    accessToken: string,
+    args: {
+      username: string
+      walletId: string
+      challengeIdentifier: string
+      firstFactor: unknown
+    }
+  ) =>
+    req<SignResult>(`/wallets/${args.walletId}/transfer/complete`, {
+      method: "POST",
+      headers: bearer(accessToken),
       body: JSON.stringify({
         username: args.username,
         challengeIdentifier: args.challengeIdentifier,

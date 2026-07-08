@@ -15,6 +15,16 @@ enum UserRole {
   SHIPPING_COMPANY
 }
 
+// KYC verification status — sourced from Sumsub webhook events.
+enum KycStatus {
+  NOT_STARTED   // no applicant created yet
+  INIT          // applicant created, verification not started
+  PENDING       // documents uploaded, awaiting review
+  COMPLETED     // verification passed (reviewAnswer = GREEN)
+  REJECTED      // verification failed / resubmission requested (reviewAnswer = RED)
+  ON_HOLD       // review paused
+}
+
 model User {
   id            String        @id @default(cuid())
   username      String        @unique
@@ -29,6 +39,14 @@ model User {
   wallet        Wallet?
   signSession   SignSession[]
 
+  // --- KYC (Sumsub) ---
+  // New users are NOT verified regardless of role. This is only set to
+  // COMPLETED once Sumsub's applicantReviewed webhook confirms reviewAnswer
+  // GREEN. Gates access to the full app until KYC is done.
+  kycStatus       KycStatus  @default(NOT_STARTED)
+  sumsubApplicantId String?  @unique
+  sumsubExternalUserId String? // mirrors our user id for Sumsub lookups
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -36,6 +54,7 @@ model User {
   @@index([username])
   @@index([email])
   @@index([dfnsUserId])
+  @@index([kycStatus])
 }
 
 model Wallet {
