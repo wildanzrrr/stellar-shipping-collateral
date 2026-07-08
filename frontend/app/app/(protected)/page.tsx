@@ -55,8 +55,6 @@ export default function AppDashboard() {
         />
 
         <SignMessageForm
-          message={sign.message}
-          onMessageChange={sign.setMessage}
           onSign={sign.sign}
           isPending={sign.isPending}
           signature={sign.signature}

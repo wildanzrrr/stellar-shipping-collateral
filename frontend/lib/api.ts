@@ -71,11 +71,7 @@ export interface RegistrationChallenge {
   [key: string]: unknown
 }
 
-export interface AlreadyRegistered {
-  alreadyRegistered: true
-}
-
-export type RegisterInitResult = RegistrationChallenge | AlreadyRegistered
+export type RegisterInitResult = RegistrationChallenge
 
 export interface LoginChallenge {
   challengeIdentifier: string
@@ -159,7 +155,7 @@ export const walletApi = {
     accessToken: string,
     username: string,
     walletId: string,
-    message: string,
+    message: string
   ) =>
     req<SignChallenge>(`/wallets/${walletId}/sign/init`, {
       method: "POST",
@@ -173,7 +169,7 @@ export const walletApi = {
       walletId: string
       challengeIdentifier: string
       firstFactor: unknown
-    },
+    }
   ) =>
     req<SignResult>(`/wallets/${args.walletId}/sign/complete`, {
       method: "POST",

@@ -33,7 +33,7 @@ export function useAuthFlow() {
 
     setStatus("Sign in with your passkey…")
     const firstFactor = await webauthn.sign(
-      init as unknown as Parameters<typeof webauthn.sign>[0],
+      init as unknown as Parameters<typeof webauthn.sign>[0]
     )
 
     setStatus("Verifying…")
@@ -75,15 +75,9 @@ export function useAuthFlow() {
       lastName: input.lastName,
     })
 
-    if ("alreadyRegistered" in regInit) {
-      setStatus("Account exists — signing you in…")
-      await completeLogin(input.email)
-      return
-    }
-
     setStatus("Create a passkey (Touch ID / security key)…")
     const attestation = await webauthn.create(
-      regInit as unknown as Parameters<typeof webauthn.create>[0],
+      regInit as unknown as Parameters<typeof webauthn.create>[0]
     )
 
     setStatus("Finishing registration…")

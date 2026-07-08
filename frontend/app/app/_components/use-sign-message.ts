@@ -14,25 +14,22 @@ export interface UseSignMessageArgs {
 }
 
 export interface UseSignMessageResult {
-  message: string
-  setMessage: (v: string) => void
   signature: string
   statusMsg: string
-  sign: () => void
+  sign: (message: string) => void
   isPending: boolean
 }
 
 /**
  * Owns the DFNS passkey sign-message flow (challenge init → WebAuthn sign →
- * complete) plus the local UI state (message, signature, status line).
- * Visual components consume the returned fields and stay pure.
+ * complete) plus the local UI state (signature, status line).
+ * The message input is managed by react-hook-form in the view layer.
  */
 export function useSignMessage({
   accessToken,
   email,
   walletId,
 }: UseSignMessageArgs): UseSignMessageResult {
-  const [message, setMessage] = useState("Hello from Stellar via DFNS!")
   const [signature, setSignature] = useState("")
   const [statusMsg, setStatusMsg] = useState("")
 
@@ -70,11 +67,9 @@ export function useSignMessage({
   })
 
   return {
-    message,
-    setMessage,
     signature,
     statusMsg,
-    sign: () => mutation.mutate(message),
+    sign: (message: string) => mutation.mutate(message),
     isPending: mutation.isPending,
   }
 }

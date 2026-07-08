@@ -25,7 +25,6 @@ export function WalletBalancesView({
   isLoading,
 }: WalletBalancesProps) {
   const usdc = balances?.usdc ?? null
-  const hasUsdc = usdc !== null && Number(usdc) > 0
 
   return (
     <div className="flex flex-col gap-2">
@@ -42,17 +41,15 @@ export function WalletBalancesView({
             {isLoading ? "…" : fmtAmount(usdc, "USDC")}
           </span>
         </div>
-        {!hasUsdc && (
-          <a
-            href="https://faucet.circle.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-1 inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
-          >
-            No USDC yet — get testnet faucet here
-            <ArrowSquareOut className="size-3" />
-          </a>
-        )}
+        <a
+          href="https://faucet.circle.com/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-1 inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
+        >
+          Get testnet faucet here
+          <ArrowSquareOut className="size-3" />
+        </a>
       </div>
     </div>
   )

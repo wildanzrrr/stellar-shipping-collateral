@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   HttpStatus,
   Injectable,
   Logger,
@@ -59,13 +60,9 @@ export class AuthService {
 
     const existing = await this.usersRepository.getByEmail(payload.email);
     if (existing?.dfnsUserId) {
-      // Already a full DFNS user — the FE should switch to the login flow.
-      return {
-        success: true,
-        message: 'User already registered',
-        data: { alreadyRegistered: true },
-        statusCode: HttpStatus.OK,
-      };
+      // Already a full DFNS user — reject the registration so the FE can
+      // notify the user and prompt them to log in instead.
+      throw new BadRequestException('Email already registered');
     }
 
     // Reuse an existing DFNS EndUser if one exists (BE restarts otherwise
@@ -105,12 +102,9 @@ export class AuthService {
     if (dfnsUserId) {
       await this.usersRepository.update(user.id, { dfnsUserId });
       await this.provisionWallet(user.id, payload.email);
-      return {
-        success: true,
-        message: 'User already registered',
-        data: { alreadyRegistered: true },
-        statusCode: HttpStatus.OK,
-      };
+      // A DFNS EndUser already exists for this email — reject so the FE
+      // surfaces an "email already registered" notification.
+      throw new BadRequestException('Email already registered');
     }
 
     const challenge =
