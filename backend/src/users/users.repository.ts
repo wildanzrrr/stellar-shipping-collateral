@@ -2,7 +2,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from 'src/prisma.service';
 import { generateCustomId } from 'src/utils/utils';
-import { Prisma, User } from 'prisma/generated/prisma/client';
+import { Prisma, User, UserRole } from 'prisma/generated/prisma/client';
 
 @Injectable()
 export class UsersRepository {
@@ -43,6 +43,24 @@ export class UsersRepository {
     }
   }
 
+  async getByEmail(email: string): Promise<User | null> {
+    this.logger.debug('Getting user by email,', email);
+    try {
+      return await this.prisma.user.findFirst({
+        where: {
+          email,
+          deletedAt: null,
+        },
+        include: {
+          wallet: true,
+        },
+      });
+    } catch (error) {
+      this.logger.error('Error in getByEmail', error);
+      throw error;
+    }
+  }
+
   async create(username: string): Promise<User> {
     this.logger.debug('Creating user with username,', username);
     try {
@@ -50,10 +68,36 @@ export class UsersRepository {
         data: {
           id: generateCustomId('usr'),
           username,
+          email: username,
         },
       });
     } catch (error) {
       this.logger.error('Error in create', error);
+      throw error;
+    }
+  }
+
+  /** Create a user from the auth flow — email is the identity, names are profile. */
+  async createWithProfile(payload: {
+    email: string;
+    role: UserRole;
+    firstName?: string;
+    lastName?: string;
+  }): Promise<User> {
+    this.logger.debug('Creating user with profile,', payload.email);
+    try {
+      return await this.prisma.user.create({
+        data: {
+          id: generateCustomId('usr'),
+          username: payload.email,
+          email: payload.email,
+          role: payload.role,
+          firstName: payload.firstName,
+          lastName: payload.lastName,
+        },
+      });
+    } catch (error) {
+      this.logger.error('Error in createWithProfile', error);
       throw error;
     }
   }

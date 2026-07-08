@@ -19,11 +19,8 @@ const fontMono = Geist_Mono({
 export const metadata: Metadata = createMetadata()
 
 export const viewport: Viewport = {
-  themeColor: [
-    // approximations of --bk-paper (oklch 99%/15% at hue 130), see tokens.css
-    { media: "(prefers-color-scheme: light)", color: "#fcfdfa" },
-    { media: "(prefers-color-scheme: dark)", color: "#1f231e" },
-  ],
+  // light-only (dark mode disabled) — approximation of --bk-paper, see tokens.css
+  themeColor: "#fcfdfa",
 }
 
 export default function RootLayout({

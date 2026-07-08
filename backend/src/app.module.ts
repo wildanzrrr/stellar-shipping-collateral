@@ -4,6 +4,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma.module';
 import { DfnsModule } from './dfns/dfns.module';
+import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { WalletsModule } from './wallets/wallets.module';
 
@@ -14,6 +15,7 @@ import { WalletsModule } from './wallets/wallets.module';
     }),
     PrismaModule,
     DfnsModule,
+    AuthModule,
     UsersModule,
     WalletsModule,
   ],

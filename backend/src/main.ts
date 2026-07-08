@@ -16,6 +16,8 @@ async function bootstrap() {
     'DFNS_ORG_ID',
     'DFNS_API_URL',
     'DFNS_SERVICE_ACCOUNT_CRED_ID',
+    'JWT_ACCESS_SECRET',
+    'JWT_REFRESH_SECRET',
   ];
 
   const missingEnvVars = requiredEnvVars.filter(

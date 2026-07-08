@@ -5,9 +5,11 @@ import {
   HttpStatus,
   Param,
   Post,
+  UseGuards,
 } from '@nestjs/common';
 import { WalletsService } from './wallets.service';
-import { ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import {
   CreateWalletDTO,
   DelegateWalletDTO,
@@ -15,6 +17,8 @@ import {
   SignCompleteDTO,
 } from './wallets.dto';
 
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('api/v1/wallets')
 export class WalletsController {
   constructor(private readonly walletsService: WalletsService) {}

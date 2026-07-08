@@ -71,7 +71,7 @@ const TICKER_ITEMS = [
 const WHY = [
   {
     tag: "For shipowners",
-    cta: { label: "Start a raise →", href: "/dashboard" },
+    cta: { label: "Start a raise →", href: "/app" },
     items: [
       {
         Icon: Lightning,
@@ -92,7 +92,7 @@ const WHY = [
   },
   {
     tag: "For investors",
-    cta: { label: "Fund an offering →", href: "/dashboard" },
+    cta: { label: "Fund an offering →", href: "/app" },
     items: [
       {
         Icon: TrendUp,
@@ -278,7 +278,7 @@ export default function Page() {
               </p>
               <div className="bk-hero__actions bk-reveal" style={styleIndex(2)}>
                 <Button asChild size="lg" className="bk-btn bk-btn--fill">
-                  <Link href="/dashboard">Open app</Link>
+                  <Link href="/app">Open app</Link>
                 </Button>
                 <Button
                   asChild
@@ -727,7 +727,7 @@ export default function Page() {
             transaction — no seed phrase, no mainnet money.
           </p>
           <Button asChild size="lg" className="bk-btn bk-btn--fill">
-            <Link href="/dashboard">Open app</Link>
+            <Link href="/app">Open app</Link>
           </Button>
         </section>
       </main>
@@ -751,7 +751,7 @@ export default function Page() {
             <p className="bk-foot__head">Platform</p>
             <ul>
               <li>
-                <Link href="/dashboard">Dashboard</Link>
+                <Link href="/app">Dashboard</Link>
               </li>
               <li>
                 <a href="#lifecycle">The lifecycle</a>
