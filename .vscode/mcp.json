@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "dfns": {
+      "type": "http",
+      "url": "https://docs.dfns.co/mcp"
+    }
+  },
+  "inputs": []
+}

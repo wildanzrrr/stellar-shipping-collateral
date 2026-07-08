@@ -46,6 +46,10 @@ lerna-debug.log*
 .temp
 .tmp
 
+# DFNS service account keys
+/config/service-account.pem
+/config/service-account.public.pem
+
 # Runtime data
 pids
 *.pid
@@ -54,3 +58,7 @@ pids
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Prisma
+/prisma/dev.db
+/prisma/generated

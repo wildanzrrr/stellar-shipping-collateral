@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "../tokens.css"; /* Bunkr locked design tokens — see design.md */
 
 @custom-variant dark (&:is(.dark *));
 
@@ -126,4 +127,13 @@
   html {
     @apply font-sans;
     }
+}
+
+/* ── Bunkr locked-system base (Hallmark append — do not reorder above) ── */
+:root {
+  --font-heading: var(--font-sans); /* headings share Geist per design.md */
+}
+html,
+body {
+  overflow-x: clip; /* clip, not hidden — preserves sticky/fixed (gate 34) */
 }
