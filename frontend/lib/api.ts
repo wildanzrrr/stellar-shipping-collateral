@@ -60,6 +60,8 @@ export const KYC_STATUS_LABELS: Record<KycStatus, string> = {
   ON_HOLD: "On hold",
 }
 
+export type QuestionnaireAnswers = Record<string, string | string[]>
+
 export interface PublicUser {
   id: string
   email: string
@@ -69,6 +71,7 @@ export interface PublicUser {
   lastName?: string | null
   walletId?: string | null
   walletAddress?: string | null
+  investmentProfile?: QuestionnaireAnswers | null
 }
 
 export interface AuthResult {
@@ -147,6 +150,12 @@ export const authApi = {
     }),
   me: (accessToken: string) =>
     req<PublicUser>("/auth/me", { headers: bearer(accessToken) }),
+  submitQuestionnaire: (accessToken: string, answers: QuestionnaireAnswers) =>
+    req<{ answers: QuestionnaireAnswers }>("/auth/questionnaire", {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify({ answers }),
+    }),
 }
 
 // ---- wallets (protected — pass the session access token) ----

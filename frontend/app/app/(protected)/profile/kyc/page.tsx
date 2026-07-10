@@ -19,22 +19,34 @@ import {
   KYC_STATUS_LABELS,
   sumsubApi,
   type KycStatus,
+  type QuestionnaireAnswers,
 } from "@/lib/api"
 
+import {
+  InvestmentQuestionnaire,
+  QuestionnaireComplete,
+} from "./_components/investment-questionnaire"
+
+type Phase = "questionnaire" | "transition" | "verification"
+
 /**
- * Sumsub KYC verification page.
+ * KYC verification page.
  *
- * Fetches a Sumsub access token from the BE (scoped to the current user), then
- * launches the Sumsub WebSDK inside a container. The WebSDK handles the entire
- * document-upload + liveness flow; completion/rejection is ultimately
- * delivered via webhook to the BE, which updates `kycStatus`. This page reacts
- * to the SDK's `onApplicantStatusChanged` / `onApplicantVerificationCompleted`
- * events for immediate UI feedback.
+ * Two-phase flow:
+ * 1. Investment profile questionnaire — 5 simple questions to build the
+ *    user's investor profile and confirm their understanding of the platform
+ *    and collateral model. No wrong answers; purely for profiling.
+ * 2. Sumsub WebSDK — document upload + liveness check. Completion/rejection
+ *    is delivered via webhook to the BE, which updates `kycStatus`. This page
+ *    reacts to the SDK's status-change events for immediate UI feedback.
  */
 export default function KycPage() {
   const router = useRouter()
   const { data: session } = useSession()
   const accessToken = session?.accessToken ?? ""
+
+  const [phase, setPhase] = useState<Phase>("questionnaire")
+  const [submitting, setSubmitting] = useState(false)
 
   // Current KYC status from the BE — refreshed when the SDK reports a change.
   const meQuery = useQuery({
@@ -46,11 +58,13 @@ export default function KycPage() {
   const kycStatus: KycStatus =
     meQuery.data?.kycStatus ?? session?.user?.kycStatus ?? "NOT_STARTED"
 
-  // Access token for the Sumsub WebSDK.
+  // Access token for the Sumsub WebSDK — only fetched when we reach the
+  // verification phase to avoid generating a token before the questionnaire
+  // is complete.
   const tokenQuery = useQuery({
     queryKey: ["sumsub-token"],
     queryFn: () => sumsubApi.getAccessToken(accessToken),
-    enabled: Boolean(accessToken),
+    enabled: Boolean(accessToken) && phase === "verification",
     staleTime: 10 * 60 * 1000,
     retry: false,
   })
@@ -71,6 +85,52 @@ export default function KycPage() {
       }
     }, 5_000)
   }, [meQuery])
+
+  // Already verified — show success state (skip questionnaire).
+  if (kycStatus === "COMPLETED") {
+    return (
+      <StatusState
+        icon={<CheckCircle size={32} className="text-emerald-600" />}
+        title="You're verified"
+        subtitle="Your identity has been confirmed. You now have full access to the app."
+        action={{ label: "Back to app", onClick: () => router.push("/app") }}
+      />
+    )
+  }
+
+  // Phase 1 — investment profile questionnaire.
+  if (phase === "questionnaire") {
+    return (
+      <InvestmentQuestionnaire
+        isSubmitting={submitting}
+        onComplete={async (answers: QuestionnaireAnswers) => {
+          setSubmitting(true)
+          try {
+            await authApi.submitQuestionnaire(accessToken, answers)
+            // Invalidate the me query so profile data reflects the new answers.
+            await meQuery.refetch()
+          } catch {
+            toast.error("Failed to save your profile. Please try again.")
+            setSubmitting(false)
+            return
+          }
+          // Brief transition so the user sees their profile was saved.
+          setPhase("transition")
+          setTimeout(() => {
+            setSubmitting(false)
+            setPhase("verification")
+          }, 1500)
+        }}
+      />
+    )
+  }
+
+  // Transition — brief "profile saved" state before Sumsub launches.
+  if (phase === "transition") {
+    return <QuestionnaireComplete />
+  }
+
+  // Phase 2 — Sumsub WebSDK verification.
 
   if (tokenQuery.isLoading) {
     return (
@@ -93,18 +153,6 @@ export default function KycPage() {
             : "Please try again later."
         }
         action={{ label: "Retry", onClick: () => tokenQuery.refetch() }}
-      />
-    )
-  }
-
-  // Already verified — show success state.
-  if (kycStatus === "COMPLETED") {
-    return (
-      <StatusState
-        icon={<CheckCircle size={32} className="text-emerald-600" />}
-        title="You're verified"
-        subtitle="Your identity has been confirmed. You now have full access to the app."
-        action={{ label: "Back to app", onClick: () => router.push("/app") }}
       />
     )
   }

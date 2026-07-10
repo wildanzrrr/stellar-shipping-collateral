@@ -1,14 +1,28 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from 'src/prisma.service';
 import { generateCustomId } from 'src/utils/utils';
-import { Prisma, User, UserRole } from 'prisma/generated/prisma/client';
+import {
+  Prisma,
+  User,
+  UserRole,
+  InvestmentProfile,
+} from 'prisma/generated/prisma/client';
+
+/** User with wallet + signSession + investmentProfile relations included. */
+export type UserWithRelations = Prisma.UserGetPayload<{
+  include: {
+    wallet: true;
+    signSession: true;
+    investmentProfile: true;
+  };
+}>;
 
 @Injectable()
 export class UsersRepository {
   private readonly logger = new Logger(UsersRepository.name);
   constructor(private readonly prisma: PrismaService) {}
 
-  async get(payload: Prisma.UserWhereInput): Promise<User | null> {
+  async get(payload: Prisma.UserWhereInput): Promise<UserWithRelations | null> {
     this.logger.debug('Getting user with payload,', payload);
     try {
       return await this.prisma.user.findFirst({
@@ -16,6 +30,7 @@ export class UsersRepository {
         include: {
           wallet: true,
           signSession: true,
+          investmentProfile: true,
         },
       });
     } catch (error) {
@@ -24,7 +39,7 @@ export class UsersRepository {
     }
   }
 
-  async getByUsername(username: string): Promise<User | null> {
+  async getByUsername(username: string): Promise<UserWithRelations | null> {
     this.logger.debug('Getting user by username,', username);
     try {
       return await this.prisma.user.findFirst({
@@ -34,6 +49,8 @@ export class UsersRepository {
         },
         include: {
           wallet: true,
+          signSession: true,
+          investmentProfile: true,
         },
       });
     } catch (error) {
@@ -42,7 +59,7 @@ export class UsersRepository {
     }
   }
 
-  async getByEmail(email: string): Promise<User | null> {
+  async getByEmail(email: string): Promise<UserWithRelations | null> {
     this.logger.debug('Getting user by email,', email);
     try {
       return await this.prisma.user.findFirst({
@@ -52,6 +69,8 @@ export class UsersRepository {
         },
         include: {
           wallet: true,
+          signSession: true,
+          investmentProfile: true,
         },
       });
     } catch (error) {
@@ -123,6 +142,41 @@ export class UsersRepository {
       });
     } catch (error) {
       this.logger.error('Error in delete', error);
+      throw error;
+    }
+  }
+
+  // --- Investment Profile ---
+
+  /** Upsert the investment profile for a user (1:1 relation). */
+  async upsertInvestmentProfile(
+    userId: string,
+    answers: Record<string, string | string[]>,
+  ): Promise<InvestmentProfile> {
+    this.logger.debug('Upserting investment profile for user,', userId);
+    try {
+      return await this.prisma.investmentProfile.upsert({
+        where: { userId },
+        create: { userId, answers },
+        update: { answers },
+      });
+    } catch (error) {
+      this.logger.error('Error in upsertInvestmentProfile', error);
+      throw error;
+    }
+  }
+
+  /** Get the investment profile for a user, if it exists. */
+  async getInvestmentProfile(
+    userId: string,
+  ): Promise<InvestmentProfile | null> {
+    this.logger.debug('Getting investment profile for user,', userId);
+    try {
+      return await this.prisma.investmentProfile.findUnique({
+        where: { userId },
+      });
+    } catch (error) {
+      this.logger.error('Error in getInvestmentProfile', error);
       throw error;
     }
   }

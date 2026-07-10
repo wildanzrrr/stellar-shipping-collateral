@@ -11,6 +11,7 @@ import { JwtService } from '@nestjs/jwt';
 import { createHash } from 'crypto';
 import type { LoginBody, RegisterBody } from '@dfns/sdk/generated/auth';
 import { UsersRepository } from 'src/users/users.repository';
+import type { UserWithRelations } from 'src/users/users.repository';
 import { WalletsRepository } from 'src/wallets/wallets.repository';
 import { WalletsService } from 'src/wallets/wallets.service';
 import { DfnsService } from 'src/dfns/dfns.service';
@@ -22,6 +23,7 @@ import {
   LoginInitDTO,
   LoginCompleteDTO,
 } from './auth.dto';
+import { SubmitQuestionnaireDTO } from './auth.dto';
 import { AuthTokens, RefreshTokenPayload } from './jwt.types';
 
 // Minimal shapes for the DFNS responses we consume (keeps this file free of `any`).
@@ -255,6 +257,31 @@ export class AuthService {
     };
   }
 
+  // --- Investment questionnaire ---
+
+  async submitQuestionnaire(
+    userId: string,
+    payload: SubmitQuestionnaireDTO,
+  ): Promise<SuccessResponseDTO> {
+    this.logger.debug('Submit questionnaire', { userId });
+
+    // Verify the user exists.
+    const user = await this.usersRepository.get({ id: userId });
+    if (!user) throw new NotFoundException('User not found');
+
+    const profile = await this.usersRepository.upsertInvestmentProfile(
+      userId,
+      payload.answers,
+    );
+
+    return {
+      success: true,
+      message: 'Investment profile saved',
+      data: { answers: profile.answers },
+      statusCode: HttpStatus.OK,
+    };
+  }
+
   async logout(userId: string): Promise<SuccessResponseDTO> {
     await this.usersRepository.update(userId, { refreshTokenHash: null });
     return {
@@ -337,7 +364,7 @@ export class AuthService {
     return createHash('sha256').update(token).digest('hex');
   }
 
-  private publicUser(user: User, wallet: Wallet | null) {
+  private publicUser(user: UserWithRelations, wallet: Wallet | null) {
     return {
       id: user.id,
       email: user.email,
@@ -347,6 +374,9 @@ export class AuthService {
       lastName: user.lastName,
       walletId: wallet?.dfnsWalletId ?? null,
       walletAddress: wallet?.address ?? null,
+      investmentProfile: user.investmentProfile
+        ? (user.investmentProfile.answers as Record<string, string | string[]>)
+        : null,
     };
   }
 

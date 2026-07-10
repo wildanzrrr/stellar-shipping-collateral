@@ -25,19 +25,23 @@ enum KycStatus {
   ON_HOLD // review paused
 }
 
+// Investment profile answers collected before KYC verification.
+// Each user has at most one profile (1:1). Answers are stored as JSON
+// because the questionnaire structure is flexible (single + multi-select).
 model User {
-  id               String        @id @default(cuid())
-  username         String        @unique
-  email            String        @unique
-  firstName        String?
-  lastName         String?
-  role             UserRole      @default(INVESTOR)
-  dfnsUserId       String?       @unique
-  userAuthToken    String?
+  id                String             @id @default(cuid())
+  username          String             @unique
+  email             String             @unique
+  firstName         String?
+  lastName          String?
+  role              UserRole           @default(INVESTOR)
+  dfnsUserId        String?            @unique
+  userAuthToken     String?
   // SHA-256 hash of the currently-valid refresh token (rotation / revocation).
-  refreshTokenHash String?
-  wallet           Wallet?
-  signSession      SignSession[]
+  refreshTokenHash  String?
+  wallet            Wallet?
+  signSession       SignSession[]
+  investmentProfile InvestmentProfile?
 
   // --- KYC (Sumsub) ---
   // New users are NOT verified regardless of role. This is only set to
@@ -95,4 +99,18 @@ model SignSession {
   @@index([walletId])
   @@index([userId])
   @@index([status])
+}
+
+// Investment profile answers collected before KYC verification.
+// Each user has at most one profile (1:1). Answers are stored as JSON
+// because the questionnaire structure is flexible (single + multi-select).
+model InvestmentProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  answers   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }

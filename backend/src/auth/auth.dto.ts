@@ -3,6 +3,7 @@ import {
   IsEmail,
   IsEnum,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
 } from 'class-validator';
@@ -81,4 +82,21 @@ export class RefreshDTO {
   @IsNotEmpty()
   @IsString()
   refreshToken: string;
+}
+
+export class SubmitQuestionnaireDTO {
+  @ApiProperty({
+    description:
+      'Questionnaire answers keyed by question id. Values are string (single-select) or string[] (multi-select).',
+    example: {
+      investor_type: 'individual',
+      asset_familiarity: ['crypto', 'rwa'],
+      risk_appetite: 'moderate',
+      understanding_platform: 'somewhat',
+      understanding_collateral: 'verified_documents',
+    },
+  })
+  @IsObject()
+  @IsNotEmpty()
+  answers: Record<string, string | string[]>;
 }
