@@ -25,6 +25,17 @@ enum KycStatus {
   ON_HOLD // review paused
 }
 
+// KYB (business) verification status — sourced from Sumsub KYB webhook events.
+// Only applies to SHIPPING_COMPANY users; investors never enter this lifecycle.
+enum KybStatus {
+  NOT_STARTED // no KYB applicant created yet
+  INIT // applicant created, verification not started
+  PENDING // company data + documents submitted, awaiting automated checks
+  COMPLETED // automated registry + AML checks passed
+  REJECTED // registry check failed or AML match found
+  ON_HOLD // review paused (e.g. document re-upload requested)
+}
+
 // Investment profile answers collected before KYC verification.
 // Each user has at most one profile (1:1). Answers are stored as JSON
 // because the questionnaire structure is flexible (single + multi-select).
@@ -51,6 +62,19 @@ model User {
   sumsubApplicantId    String?   @unique
   sumsubExternalUserId String? // mirrors our user id for Sumsub lookups
 
+  // --- KYB (Sumsub business verification) ---
+  // Only SHIPPING_COMPANY users go through KYB. KYC must be COMPLETED first.
+  // KybStatus tracks the business verification lifecycle independently from
+  // KYC. Both must be COMPLETED for the shipping company to tokenize RWAs.
+  kybStatus              KybStatus @default(NOT_STARTED)
+  sumsubKybApplicantId   String?   @unique
+  sumsubKybExternalUserId String? // "{userId}:kyb" for webhook routing
+
+  // Business profile data — populated from Sumsub KYB webhook when approved.
+  companyName             String?
+  companyRegistrationNumber String?
+  companyCountry          String?
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -59,6 +83,7 @@ model User {
   @@index([email])
   @@index([dfnsUserId])
   @@index([kycStatus])
+  @@index([kybStatus])
 }
 
 model Wallet {

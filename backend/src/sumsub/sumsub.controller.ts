@@ -52,6 +52,31 @@ export class SumsubController {
       body?.applicantId,
     );
   }
+
+  @Post('kyb-access-token')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get Sumsub KYB access token',
+    description:
+      'Generates a Sumsub access token for KYB (business verification). ' +
+      'Only SHIPPING_COMPANY users with completed KYC can start KYB. ' +
+      'Uses SUMSUB_KYB_LEVEL_NAME (Individuals level) and routes webhooks via "{userId}:kyb".',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'KYB access token generated',
+    schema: {
+      example: {
+        success: true,
+        message: 'Sumsub KYB access token generated',
+        data: { token: 'abc123...', externalUserId: 'usr-abc:kyb' },
+        statusCode: 200,
+      },
+    },
+  })
+  async getKybAccessToken(@Req() req: AuthenticatedRequest) {
+    return this.sumsubService.generateKybAccessToken(req.user.sub);
+  }
 }
 
 /**

@@ -1,6 +1,6 @@
-# Sumsub KYC Frontend Integration
+# Sumsub KYC/KYB Frontend Integration
 
-How the Next.js frontend integrates with [Sumsub](https://sumsub.com/) via the WebSDK to let users complete identity verification (KYC) in-app.
+How the Next.js frontend integrates with [Sumsub](https://sumsub.com/) via the WebSDK to let users complete identity verification (KYC) and business verification (KYB) in-app.
 
 ---
 
@@ -149,7 +149,62 @@ Without this, the WebSDK's liveness/document capture will fail with "Permission 
 
 ---
 
-## 8. Notes
+## 9. KYB — Business Verification (Shipping Companies)
+
+KYB is a second verification tier for `SHIPPING_COMPANY` users, run **after** KYC completes. It uses a separate Individuals level (`kyb_registry`) — same level type as KYC but with different checks configured in the Sumsub Dashboard. This avoids the paid Companies/Registry-and-AML-Check feature.
+
+### KYB banner
+
+When a `SHIPPING_COMPANY` user has `kycStatus === 'COMPLETED'` but `kybStatus !== 'COMPLETED'`, a KYB-specific banner appears (same component as KYC banner, with KYB messaging and a link to `/app/profile/kyb`).
+
+### KYB page (`/app/profile/kyb`)
+
+Same WebSDK pattern as the KYC page, but:
+
+- Calls `sumsubApi.getKybAccessToken(accessToken)` instead of `getAccessToken`.
+- No investment questionnaire phase — goes straight to the WebSDK.
+- Guards: redirects to KYC page if `kycStatus !== 'COMPLETED'`.
+
+### Profile page updates
+
+The profile page shows a `KYB status` badge (in addition to `KYC status`) for shipping company users, plus a business info card with company name, registration number, and country (populated from the KYB webhook).
+
+### Data flow
+
+```mermaid
+sequenceDiagram
+  participant FE as Frontend
+  participant BE as Backend
+  participant SS as Sumsub
+
+  FE->>BE: POST /sumsub/kyb-access-token (JWT)
+  BE->>BE: Verify role=SHIPPING_COMPANY + kycStatus=COMPLETED
+  BE->>SS: POST /resources/accessTokens/sdk (levelName=KYB, userId="{uid}:kyb")
+  SS-->>BE: { token, userId }
+  BE-->>FE: { token, externalUserId }
+  FE->>SS: WebSDK launches with KYB token
+  Note over FE,SS: User enters company details + documents
+  SS->>BE: POST /sumsub/webhook (externalUserId="{uid}:kyb")
+  BE->>BE: Detect :kyb suffix → handleKybWebhook → update kybStatus
+  FE->>BE: GET /auth/me (polling)
+  BE-->>FE: { kybStatus: COMPLETED }
+```
+
+### Key files (KYB additions)
+
+```
+frontend/
+├── lib/api.ts                    # KybStatus type, KYB_STATUS_LABELS, sumsubApi.getKybAccessToken()
+├── auth.ts                       # kybStatus propagated through NextAuth
+├── types/next-auth.d.ts          # KybStatus added to Session/User/JWT
+├── components/app/kyc-banner.tsx  # KYB banner logic
+├── app/app/(protected)/profile/kyb/page.tsx  # KYB WebSDK page
+└── app/app/(protected)/profile/page.tsx      # KYB badge + business info
+```
+
+---
+
+## 10. Notes
 
 - The theme is light-only (`forcedTheme="light"` in `ThemeProvider`), so the WebSDK `config.theme` is left unset (auto-selects light).
 - The `@sumsub/websdk-react` package (v2.6.3+) is the React wrapper for WebSDK 2.0.

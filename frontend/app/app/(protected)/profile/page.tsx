@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useSession } from "next-auth/react"
 import {
   ArrowRight,
+  Building,
   CircleNotch,
   IdentificationCard,
   Sparkle,
@@ -14,8 +15,10 @@ import {
 import {
   authApi,
   KYC_STATUS_LABELS,
+  KYB_STATUS_LABELS,
   ROLE_LABELS,
   type KycStatus,
+  type KybStatus,
   type QuestionnaireAnswers,
   type UserRole,
 } from "@/lib/api"
@@ -45,6 +48,8 @@ export default function ProfilePage() {
   const role: UserRole | undefined = meQuery.data?.role ?? session?.user?.role
   const kycStatus: KycStatus | undefined =
     meQuery.data?.kycStatus ?? session?.user?.kycStatus
+  const kybStatus: KybStatus | undefined =
+    meQuery.data?.kybStatus ?? session?.user?.kybStatus
   const profile: QuestionnaireAnswers | null | undefined =
     meQuery.data?.investmentProfile ?? null
 
@@ -96,8 +101,53 @@ export default function ProfilePage() {
                 )}
               </div>
             </div>
+            {role === "SHIPPING_COMPANY" && (
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">KYB status</span>
+                <div className="flex items-center gap-2">
+                  {kybStatus && <KybBadge status={kybStatus} />}
+                  {kybStatus !== "COMPLETED" && kycStatus === "COMPLETED" && (
+                    <Link
+                      href="/app/profile/kyb"
+                      className="text-xs font-medium text-primary hover:underline"
+                    >
+                      Verify now →
+                    </Link>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
+
+        {/* Business info card — only for shipping companies */}
+        {role === "SHIPPING_COMPANY" &&
+          meQuery.data?.companyName && (
+            <div className="mt-6 flex flex-col gap-0">
+              <div className="flex items-center gap-2 border-b pb-3">
+                <Building size={18} className="text-muted-foreground" />
+                <h2 className="text-sm font-medium">Business</h2>
+              </div>
+              <div className="mt-3 flex flex-col gap-3 text-sm">
+                <ProfileRow
+                  label="Company name"
+                  value={meQuery.data.companyName}
+                />
+                {meQuery.data.companyRegistrationNumber && (
+                  <ProfileRow
+                    label="Registration number"
+                    value={meQuery.data.companyRegistrationNumber}
+                  />
+                )}
+                {meQuery.data.companyCountry && (
+                  <ProfileRow
+                    label="Country"
+                    value={meQuery.data.companyCountry}
+                  />
+                )}
+              </div>
+            </div>
+          )}
 
         {/* Investment profile card */}
         <div className="mt-6 flex flex-col gap-0">
@@ -204,6 +254,23 @@ function KycBadge({ status }: { status: KycStatus }) {
       ].join(" ")}
     >
       {KYC_STATUS_LABELS[status]}
+    </span>
+  )
+}
+
+function KybBadge({ status }: { status: KybStatus }) {
+  return (
+    <span
+      className={[
+        "rounded-full border px-2 py-0.5 text-xs font-medium",
+        status === "COMPLETED"
+          ? "border-emerald-500/30 bg-emerald-50 text-emerald-700"
+          : status === "REJECTED" || status === "ON_HOLD"
+            ? "border-destructive/30 bg-destructive/5 text-destructive"
+            : "border-border text-muted-foreground",
+      ].join(" ")}
+    >
+      {KYB_STATUS_LABELS[status]}
     </span>
   )
 }

@@ -48,6 +48,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         userId: {},
         role: {},
         kycStatus: {},
+        kybStatus: {},
         firstName: {},
         lastName: {},
         walletId: {},
@@ -68,6 +69,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             (credentials.role as "INVESTOR" | "SHIPPING_COMPANY") || undefined,
           kycStatus:
             (credentials.kycStatus as
+              | "NOT_STARTED"
+              | "INIT"
+              | "PENDING"
+              | "COMPLETED"
+              | "REJECTED"
+              | "ON_HOLD") || "NOT_STARTED",
+          kybStatus:
+            (credentials.kybStatus as
               | "NOT_STARTED"
               | "INIT"
               | "PENDING"
@@ -95,6 +104,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.accessTokenExpires = user.accessTokenExpires
         token.role = user.role
         token.kycStatus = user.kycStatus
+        token.kybStatus = user.kybStatus
         token.firstName = user.firstName
         token.lastName = user.lastName
         token.walletId = user.walletId
@@ -120,6 +130,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (token.sub) session.user.id = token.sub
         session.user.role = token.role
         session.user.kycStatus = token.kycStatus
+        session.user.kybStatus = token.kybStatus
         session.user.firstName = token.firstName
         session.user.lastName = token.lastName
         session.user.walletId = token.walletId

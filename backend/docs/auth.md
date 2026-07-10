@@ -24,13 +24,13 @@ Email-first authentication built on **DFNS delegated custody + passkeys**, issui
 
 The auth layer lives in [`src/auth/`](../src/auth). It orchestrates the DFNS passkey ceremony (server-driven, delegated custody) and, on success, mints the app's own tokens so the rest of the API is protected by a plain JWT bearer.
 
-| Concern | Choice |
-| --- | --- |
-| Identity | Email (also stored as `username` for DFNS) |
-| Proof of identity | WebAuthn passkey via DFNS |
-| Session tokens | App-issued JWT: short-lived **access** + long-lived **refresh** |
-| Authorization | `role` claim (`INVESTOR` \| `SHIPPING_COMPANY`) |
-| Wallet | Auto-created + friendbot-funded + USDC-trustlined + delegated at registration |
+| Concern           | Choice                                                                        |
+| ----------------- | ----------------------------------------------------------------------------- |
+| Identity          | Email (also stored as `username` for DFNS)                                    |
+| Proof of identity | WebAuthn passkey via DFNS                                                     |
+| Session tokens    | App-issued JWT: short-lived **access** + long-lived **refresh**               |
+| Authorization     | `role` claim (`INVESTOR` \| `SHIPPING_COMPANY`)                               |
+| Wallet            | Auto-created + friendbot-funded + USDC-trustlined + delegated at registration |
 
 Key files:
 
@@ -67,7 +67,18 @@ model User {
   userAuthToken    String?              // DFNS end-user token (from login)
   refreshTokenHash String?              // SHA-256 of the current refresh token
   wallet           Wallet?
+  investmentProfile InvestmentProfile?  // 1:1 — questionnaire answers
   // ...
+}
+
+model InvestmentProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  answers   Json     // Record<string, string | string[]>
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([userId])
 }
 ```
 
@@ -75,6 +86,8 @@ Migrations:
 
 - `20260708120000_add_auth_fields` — `email`, `firstName`, `lastName`, `refreshTokenHash`.
 - `20260708130000_add_user_role` — `UserRole` enum + `role` column (default `INVESTOR`).
+- `20260708140000_add_kyc_fields` — `kycStatus`, `sumsubApplicantId`, `sumsubExternalUserId`.
+- `20260710174103_add_investment_profile` — `InvestmentProfile` model (1:1 with User).
 
 The role default exists only for migration safety — **registration always sets the role explicitly**.
 
@@ -101,15 +114,16 @@ AuthModule  ──imports──▶  WalletsModule ──imports──▶ UsersMo
 
 All under the `api/v1/auth` prefix. Every response is the standard `{ success, message, data, statusCode }` envelope.
 
-| Method | Path | Auth | Body | `data` returned |
-| --- | --- | --- | --- | --- |
-| POST | `/register/init` | — | `{ email, role, firstName?, lastName? }` | DFNS registration challenge **or** `{ alreadyRegistered: true }` |
-| POST | `/register/complete` | — | `{ email, temporaryAuthenticationToken, firstFactorCredential }` | `{ registered: true }` |
-| POST | `/login/init` | — | `{ email }` | DFNS login challenge |
-| POST | `/login/complete` | — | `{ email, challengeIdentifier, firstFactor }` | `{ accessToken, refreshToken, expiresIn, user }` |
-| POST | `/refresh` | — | `{ refreshToken }` | `{ accessToken, refreshToken, expiresIn, user }` |
-| GET | `/me` | Bearer | — | `user` |
-| POST | `/logout` | Bearer | — | `{ loggedOut: true }` |
+| Method | Path                 | Auth   | Body                                                             | `data` returned                                                  |
+| ------ | -------------------- | ------ | ---------------------------------------------------------------- | ---------------------------------------------------------------- |
+| POST   | `/register/init`     | —      | `{ email, role, firstName?, lastName? }`                         | DFNS registration challenge **or** `{ alreadyRegistered: true }` |
+| POST   | `/register/complete` | —      | `{ email, temporaryAuthenticationToken, firstFactorCredential }` | `{ registered: true }`                                           |
+| POST   | `/login/init`        | —      | `{ email }`                                                      | DFNS login challenge                                             |
+| POST   | `/login/complete`    | —      | `{ email, challengeIdentifier, firstFactor }`                    | `{ accessToken, refreshToken, expiresIn, user }`                 |
+| POST   | `/refresh`           | —      | `{ refreshToken }`                                               | `{ accessToken, refreshToken, expiresIn, user }`                 |
+| GET    | `/me`                | Bearer | —                                                                | `user`                                                           |
+| POST   | `/questionnaire`     | Bearer | `{ answers: Record<string, string \| string[]> }`                | `{ answers: Record<string, string \| string[]> }`                |
+| POST   | `/logout`            | Bearer | —                                                                | `{ loggedOut: true }`                                            |
 
 `user` (public shape):
 
@@ -120,8 +134,16 @@ All under the `api/v1/auth` prefix. Every response is the standard `{ success, m
   "role": "INVESTOR",
   "firstName": "Alice",
   "lastName": "Doe",
-  "walletId": "wa-…",            // DFNS wallet id, null until provisioned
-  "walletAddress": "G…"          // Stellar address, null until provisioned
+  "walletId": "wa-…", // DFNS wallet id, null until provisioned
+  "walletAddress": "G…", // Stellar address, null until provisioned
+  "investmentProfile": {
+    // questionnaire answers, null if not yet submitted
+    "investor_type": "individual",
+    "asset_familiarity": ["stocks", "crypto"],
+    "risk_appetite": "moderate",
+    "understanding_platform": "basic",
+    "understanding_collateral": "basic",
+  },
 }
 ```
 
@@ -160,7 +182,7 @@ The wallet claims (`walletId`, `walletAddress`) are sourced from the DB at token
 
 ### Login
 
-`POST /auth/login` on DFNS is a **public** endpoint — the WebAuthn assertion *is* the proof of identity, so there is **no temporary token**.
+`POST /auth/login` on DFNS is a **public** endpoint — the WebAuthn assertion _is_ the proof of identity, so there is **no temporary token**.
 
 1. **`/login/init`** — returns a DFNS login challenge (`createLoginChallenge`).
 2. Browser signs it (`webauthn.sign`).
@@ -177,7 +199,7 @@ The wallet claims (`walletId`, `walletAddress`) are sourced from the DB at token
 `AuthService.provisionWallet(userId, email)` runs during registration (idempotent — skips if a wallet already exists), in this exact order:
 
 ```
-createWallet (SA-owned, delayDelegation) 
+createWallet (SA-owned, delayDelegation)
    → friendbot fund (inside createWallet)
    → addUsdcTrustline  (SA-signed, BEFORE delegation)
    → delegateWallet    (transfer control to the end user)
@@ -193,14 +215,42 @@ Why the trustline is added **before** delegation: while the wallet is still serv
 
 USDC asset (defaults in [`src/utils/constant.ts`](../src/utils/constant.ts), overridable via env):
 
-| Field | Value |
-| --- | --- |
-| `USDC_ISSUER` | `GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5` |
-| `USDC_ASSET_CODE` | `USDC` |
+| Field             | Value                                                      |
+| ----------------- | ---------------------------------------------------------- |
+| `USDC_ISSUER`     | `GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5` |
+| `USDC_ASSET_CODE` | `USDC`                                                     |
 
 Provisioning is **non-fatal**: if DFNS/Horizon hiccups, registration still succeeds and the wallet claims stay `null` until it's retried.
 
 > `broadcastTransaction` confirms asynchronously on-chain (a few seconds). Fine for the later USDC faucet; poll transaction status if you need a hard confirmation before proceeding.
+
+---
+
+## Investment Profile Questionnaire
+
+Before KYC verification, the frontend collects a 5-question investment profile (investor type, asset familiarity, risk appetite, platform understanding, collateral understanding). Answers are single-select or multi-select and stored as a `Record<string, string | string[]>` JSON.
+
+### Endpoint
+
+`POST /api/v1/auth/questionnaire` (Bearer-protected) — accepts `{ answers }` and upserts the user's `InvestmentProfile` (1:1 relation, keyed by `userId`).
+
+### Data Flow
+
+```
+FE questionnaire form
+  → POST /auth/questionnaire { answers: Record<string, string | string[]> }
+  → UsersRepository.upsertInvestmentProfile(userId, answers)
+  → InvestmentProfile row (create or update)
+  → FE refetches /auth/me → publicUser now includes investmentProfile
+```
+
+### `publicUser` shape
+
+The `publicUser()` helper in `AuthService` maps the Prisma `User` (with relations) to the public API shape. It casts `investmentProfile.answers` from `Json` to `Record<string, string | string[]>` (or `null` if not yet submitted).
+
+### `UserWithRelations` type
+
+The `get()`, `getByEmail()`, and `getByUsername()` repository methods return `UserWithRelations` — a `Prisma.UserGetPayload<{ include: { wallet, signSession, investmentProfile } }>` — so that `publicUser()` can access `user.investmentProfile` with full type safety. This type is exported from `UsersRepository` and imported by `AuthService`.
 
 ---
 

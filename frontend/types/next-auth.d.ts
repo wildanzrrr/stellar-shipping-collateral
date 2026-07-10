@@ -1,5 +1,5 @@
 import type { DefaultSession } from "next-auth"
-import type { KycStatus, UserRole } from "@/lib/api"
+import type { KycStatus, KybStatus, UserRole } from "@/lib/api"
 
 declare module "next-auth" {
   interface Session {
@@ -9,6 +9,7 @@ declare module "next-auth" {
       id?: string
       role?: UserRole
       kycStatus?: KycStatus
+      kybStatus?: KybStatus
       firstName?: string | null
       lastName?: string | null
       walletId?: string | null
@@ -22,6 +23,7 @@ declare module "next-auth" {
     accessTokenExpires?: number
     role?: UserRole
     kycStatus?: KycStatus
+    kybStatus?: KybStatus
     firstName?: string | null
     lastName?: string | null
     walletId?: string | null
@@ -36,6 +38,7 @@ declare module "next-auth/jwt" {
     accessTokenExpires?: number
     role?: UserRole
     kycStatus?: KycStatus
+    kybStatus?: KybStatus
     firstName?: string | null
     lastName?: string | null
     walletId?: string | null

@@ -10,7 +10,7 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { UsersRepository } from 'src/users/users.repository';
 import { SuccessResponseDTO } from 'src/utils/dto';
 import { SumsubWebhookPayload } from './sumsub.dto';
-import { KycStatus } from 'prisma/generated/prisma/client';
+import { KycStatus, KybStatus, UserRole } from 'prisma/generated/prisma/client';
 
 /**
  * Sumsub KYC integration.
@@ -126,13 +126,119 @@ export class SumsubService {
   }
 
   /**
+   * Generate a Sumsub access token for KYB (business verification).
+   *
+   * Only SHIPPING_COMPANY users who have completed KYC can start KYB.
+   * Uses `SUMSUB_KYB_LEVEL_NAME` (an Individuals level, same level type as
+   * KYC but with different checks configured in the Sumsub Dashboard) and
+   * sets `externalUserId = "{userId}:kyb"` so webhook events can be routed
+   * to the KYB lifecycle instead of KYC.
+   */
+  async generateKybAccessToken(userId: string): Promise<SuccessResponseDTO> {
+    const user = await this.users.get({ id: userId });
+    if (!user) throw new NotFoundException('User not found');
+
+    // Guard: only shipping companies can do KYB.
+    if (user.role !== UserRole.SHIPPING_COMPANY) {
+      throw new BadGatewayException(
+        'KYB verification is only available for shipping companies',
+      );
+    }
+
+    // Guard: KYC must be completed before starting KYB.
+    if (user.kycStatus !== KycStatus.COMPLETED) {
+      throw new BadGatewayException(
+        'KYC verification must be completed before starting KYB',
+      );
+    }
+
+    // Guard: already verified — no need to re-issue.
+    if (user.kybStatus === KybStatus.COMPLETED) {
+      throw new BadGatewayException('KYB verification already completed');
+    }
+
+    const appToken = this.config.getOrThrow<string>('SUMSUB_APP_TOKEN');
+    const secretKey = this.config.getOrThrow<string>('SUMSUB_SECRET_KEY');
+    const baseUrl = this.config.getOrThrow<string>('SUMSUB_BASE_URL');
+    const levelName = this.config.getOrThrow<string>('SUMSUB_KYB_LEVEL_NAME');
+
+    // Use "{userId}:kyb" as the externalUserId so webhooks can distinguish
+    // KYB events from KYC events on the same endpoint.
+    const kybExternalUserId = `${user.id}:kyb`;
+
+    const endpoint = '/resources/accessTokens/sdk';
+    const url = new URL(endpoint, baseUrl);
+
+    const bodyObj: Record<string, unknown> = {
+      userId: kybExternalUserId,
+      levelName,
+      ttlInSecs: 600,
+      applicantIdentifiers: {
+        email: user.email,
+      },
+    };
+    const bodyStr = JSON.stringify(bodyObj);
+
+    const ts = Math.floor(Date.now() / 1000).toString();
+    const method = 'POST';
+    const digest = this.signRequest(ts, method, endpoint, bodyStr, secretKey);
+
+    let tokenRes: { token?: string; userId?: string };
+    try {
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: {
+          'X-App-Token': appToken,
+          'X-App-Access-Sig': digest,
+          'X-App-Access-Ts': ts,
+          'Content-Type': 'application/json',
+        },
+        body: bodyStr,
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        throw new BadGatewayException(
+          `Sumsub KYB token request failed (${res.status}): ${body}`,
+        );
+      }
+      tokenRes = (await res.json()) as { token?: string; userId?: string };
+    } catch (error) {
+      if (error instanceof BadGatewayException) throw error;
+      this.logger.error(
+        'Sumsub KYB access token request failed',
+        error instanceof Error ? error.stack : String(error),
+      );
+      throw new BadGatewayException(
+        `Sumsub KYB access token request failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    // Mark user as INIT the first time they request a KYB token.
+    if (user.kybStatus === KybStatus.NOT_STARTED) {
+      await this.users.update(user.id, {
+        kybStatus: KybStatus.INIT,
+        sumsubKybExternalUserId: kybExternalUserId,
+      });
+    }
+
+    return {
+      success: true,
+      message: 'Sumsub KYB access token generated',
+      data: { token: tokenRes.token, externalUserId: kybExternalUserId },
+      statusCode: HttpStatus.OK,
+    };
+  }
+
+  /**
    * Verify the Sumsub webhook HMAC signature and process the event.
    *
    * Signature is computed as HMAC-SHA256(secretKey, ts + body) over the
    * raw request body. We compare in constant time.
    *
    * We only act on `applicantReviewed` (and applicantPending / applicantOnHold)
-   * to update the user's KYC status. The `externalUserId` maps to our user id.
+   * to update the user's status. The `externalUserId` maps to our user id.
+   *
+   * KYB events are routed via the `:kyb` suffix on externalUserId.
    */
   async handleWebhook(
     rawBody: string,
@@ -164,7 +270,12 @@ export class SumsubService {
       };
     }
 
-    const user = await this.users.get({ id: externalUserId });
+    // Route: KYB events use "{userId}:kyb" as externalUserId, KYC events
+    // use the bare user id.
+    const isKyb = externalUserId.endsWith(':kyb');
+    const userId = isKyb ? externalUserId.slice(0, -4) : externalUserId;
+
+    const user = await this.users.get({ id: userId });
     if (!user) {
       this.logger.warn(
         `No user for externalUserId=${externalUserId} — ignoring`,
@@ -175,6 +286,12 @@ export class SumsubService {
         statusCode: HttpStatus.OK,
       };
     }
+
+    if (isKyb) {
+      return this.handleKybWebhook(user, payload);
+    }
+
+    // --- KYC webhook handling ---
 
     // Store / update the Sumsub applicant id on first sight.
     const update: {
@@ -224,6 +341,126 @@ export class SumsubService {
       message: 'Webhook processed',
       data: { type: payload.type, status: update.kycStatus ?? 'unchanged' },
       statusCode: HttpStatus.OK,
+    };
+  }
+
+  // --- KYB webhook handling -----------------------------------------------
+
+  /**
+   * Process a Sumsub KYB webhook event. Updates the user's `kybStatus` and
+   * extracts company info (name, registration number, country) from the
+   * payload when available.
+   *
+   * The KYB level is an Individuals level (same type as KYC) with its own
+   * set of checks. Results come through the same webhook types as KYC.
+   */
+  private async handleKybWebhook(
+    user: Awaited<ReturnType<UsersRepository['get']>>,
+    payload: SumsubWebhookPayload,
+  ): Promise<SuccessResponseDTO> {
+    if (!user) {
+      return {
+        success: true,
+        message: 'Ignored (no user)',
+        statusCode: HttpStatus.OK,
+      };
+    }
+
+    const update: {
+      sumsubKybApplicantId?: string;
+      kybStatus?: KybStatus;
+      companyName?: string;
+      companyRegistrationNumber?: string;
+      companyCountry?: string;
+    } = { sumsubKybApplicantId: payload.applicantId };
+
+    // Extract company info from the payload if present (Sumsub includes
+    // applicant data in some webhook types, or we can fetch it separately).
+    // The info block may appear at payload-level or nested under reviewResult.
+    const companyInfo = this.extractCompanyInfo(payload);
+    if (companyInfo) {
+      if (companyInfo.name) update.companyName = companyInfo.name;
+      if (companyInfo.registrationNumber)
+        update.companyRegistrationNumber = companyInfo.registrationNumber;
+      if (companyInfo.country) update.companyCountry = companyInfo.country;
+    }
+
+    switch (payload.type) {
+      case 'applicantCreated':
+        update.kybStatus = KybStatus.INIT;
+        break;
+
+      case 'applicantPending':
+        update.kybStatus = KybStatus.PENDING;
+        break;
+
+      case 'applicantOnHold':
+        update.kybStatus = KybStatus.ON_HOLD;
+        break;
+
+      case 'applicantReviewed': {
+        const answer = payload.reviewResult?.reviewAnswer;
+        if (payload.reviewStatus === 'completed' && answer === 'GREEN') {
+          update.kybStatus = KybStatus.COMPLETED;
+        } else if (answer === 'RED') {
+          update.kybStatus = KybStatus.REJECTED;
+        }
+        break;
+      }
+    }
+
+    if (update.kybStatus) {
+      await this.users.update(user.id, update);
+      this.logger.log(
+        `KYB status updated → user=${user.id} status=${update.kybStatus}`,
+      );
+    } else if (update.sumsubKybApplicantId) {
+      await this.users.update(user.id, update);
+    }
+
+    return {
+      success: true,
+      message: 'KYB webhook processed',
+      data: { type: payload.type, status: update.kybStatus ?? 'unchanged' },
+      statusCode: HttpStatus.OK,
+    };
+  }
+
+  /**
+   * Extract company information from a Sumsub KYB webhook payload.
+   * Company data may be included in the `info` field or nested within
+   * review results depending on the level configuration.
+   */
+  private extractCompanyInfo(
+    payload: SumsubWebhookPayload,
+  ): { name?: string; registrationNumber?: string; country?: string } | null {
+    // Sumsub KYB payloads may include an `info` object with company details.
+    // We use a loose cast since the webhook payload shape varies by level config.
+    const raw = payload as SumsubWebhookPayload & {
+      info?: {
+        companyName?: string;
+        companyInfo?: {
+          registrationNumber?: string;
+          country?: string;
+          name?: string;
+        };
+      };
+      fixedInfo?: {
+        companyName?: string;
+        country?: string;
+      };
+    };
+
+    const name = raw.info?.companyName ?? raw.fixedInfo?.companyName;
+    const registrationNumber = raw.info?.companyInfo?.registrationNumber;
+    const country = raw.info?.companyInfo?.country ?? raw.fixedInfo?.country;
+
+    if (!name && !registrationNumber && !country) return null;
+
+    return {
+      name: name ?? raw.info?.companyInfo?.name,
+      registrationNumber,
+      country,
     };
   }
 

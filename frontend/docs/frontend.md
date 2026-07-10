@@ -22,26 +22,26 @@
 
 ## Read First
 
-1. **[`AGENTS.md`](../AGENTS.md)** — this is a *modified* Next.js (v16, Turbopack). APIs and conventions differ from training data. Read the relevant guide in `node_modules/next/dist/docs/` before using an unfamiliar Next API, and **heed deprecation notices** (e.g. `middleware.ts` → `proxy.ts`).
-2. **[`design.md`](../design.md)** + **[`tokens.css`](../tokens.css)** — the *locked* design system (Bunkr). Landing/marketing surfaces defer to it. Amend `design.md` intentionally; never hand-pick colors that bypass the tokens.
+1. **[`AGENTS.md`](../AGENTS.md)** — this is a _modified_ Next.js (v16, Turbopack). APIs and conventions differ from training data. Read the relevant guide in `node_modules/next/dist/docs/` before using an unfamiliar Next API, and **heed deprecation notices** (e.g. `middleware.ts` → `proxy.ts`).
+2. **[`design.md`](../design.md)** + **[`tokens.css`](../tokens.css)** — the _locked_ design system (Bunkr). Landing/marketing surfaces defer to it. Amend `design.md` intentionally; never hand-pick colors that bypass the tokens.
 3. **[`docs/auth.md`](./auth.md)** — authentication (NextAuth + backend JWT). **[`docs/dfns.md`](./dfns.md)** — DFNS passkey wallet integration.
 
 ---
 
 ## Tech Stack
 
-| Layer | Choice |
-| --- | --- |
-| Framework | Next.js 16 (App Router, Turbopack, RSC) |
-| Language | TypeScript (strict) — **no `any`** |
-| UI kit | **shadcn/ui** (`radix-vega` style) on `radix-ui` primitives |
-| Styling | Tailwind CSS v4 (`@tailwindcss/postcss`) + design tokens |
-| Icons | `@phosphor-icons/react` |
-| Data | `@tanstack/react-query` |
-| Auth | `next-auth@5` (Auth.js v5) |
-| Toasts | `sonner` |
-| Variants | `class-variance-authority` (`cva`) + `cn` (`clsx` + `tailwind-merge`) |
-| Package mgr | `pnpm` |
+| Layer       | Choice                                                                |
+| ----------- | --------------------------------------------------------------------- |
+| Framework   | Next.js 16 (App Router, Turbopack, RSC)                               |
+| Language    | TypeScript (strict) — **no `any`**                                    |
+| UI kit      | **shadcn/ui** (`radix-vega` style) on `radix-ui` primitives           |
+| Styling     | Tailwind CSS v4 (`@tailwindcss/postcss`) + design tokens              |
+| Icons       | `@phosphor-icons/react`                                               |
+| Data        | `@tanstack/react-query`                                               |
+| Auth        | `next-auth@5` (Auth.js v5)                                            |
+| Toasts      | `sonner`                                                              |
+| Variants    | `class-variance-authority` (`cva`) + `cn` (`clsx` + `tailwind-merge`) |
+| Package mgr | `pnpm`                                                                |
 
 ---
 
@@ -58,6 +58,12 @@ frontend/
 │   └── app/                      # "/app" authenticated product
 │       ├── layout.tsx            # SessionProvider + QueryProvider shell
 │       ├── page.tsx              # dashboard (role-aware)
+│       ├── (protected)/
+│       │   └── profile/
+│       │       ├── page.tsx          # user profile (account + investment profile)
+│       │       └── kyc/
+│       │           ├── page.tsx          # KYC: questionnaire → Sumsub WebSDK
+│       │           └── _components/      # questionnaire-data.ts, investment-questionnaire.tsx
 │       └── auth/
 │           ├── page.tsx          # thin composer
 │           └── _components/      # route-private building blocks
@@ -86,7 +92,7 @@ Path alias: **`@/*` → project root** (e.g. `@/components/ui/button`, `@/lib/ap
 ## Routing Conventions
 
 - **App Router only.** Routes are folders with `page.tsx`; nested layouts with `layout.tsx`.
-- **Route-private components go in a `_components/` folder** next to the route that owns them (the `_` prefix excludes it from routing). Only promote to `components/` when a piece is genuinely shared across routes.
+- **Route-private components go in a `_components/` folder** next to the route that owns them (the `_` prefix excludes it from routing). Only promote to `components/` when a piece is genuinely shared across routes. Example: `app/app/(protected)/profile/kyc/_components/` holds the questionnaire data and form components.
 - **Keep `page.tsx` thin.** A page composes building blocks; it should not hold large JSX or business logic. See `app/app/auth/page.tsx` — it only provides the `Suspense` boundary and renders `<AuthPanel/>`.
 - **Metadata comes from the factory.** Use `createMetadata({ title, description, path, noIndex? })` from [`lib/seo.ts`](../lib/seo.ts) in a `layout.tsx` (client pages can't export `metadata`, so put it on the segment layout).
 - **`useSearchParams` needs a `Suspense` boundary** above it — a component can't both call it and be its own boundary. That's why auth pages split page → `Suspense` → panel.
@@ -118,6 +124,7 @@ Path alias: **`@/*` → project root** (e.g. `@/components/ui/button`, `@/lib/ap
 4. **Hand-roll only** genuinely bespoke, non-primitive UI — and still build it from tokens + `cn`/`cva`, matching the shadcn file shape.
 
 Rules:
+
 - Import UI from **`@/components/ui/*`**; icons from **`@phosphor-icons/react`**.
 - Variants use **`cva`**; class merging uses **`cn`** from `@/lib/utils`. Never string-concatenate classNames when `cn` applies.
 - Don't restyle a shadcn component with ad-hoc overrides when a `variant`/`size` exists — extend `cva` if a new variant is truly needed.
@@ -138,10 +145,11 @@ Rules:
 
 ## Data Fetching
 
-- **All backend calls go through [`lib/api.ts`](../lib/api.ts)** (`authApi`, `walletApi`) — typed, unwraps the `{ data }` envelope, attaches the bearer token. Add new endpoints there; do not scatter `fetch` calls in components.
+- **All backend calls go through [`lib/api.ts`](../lib/api.ts)** (`authApi`, `walletApi`, `sumsubApi`) — typed, unwraps the `{ data }` envelope, attaches the bearer token. Add new endpoints there; do not scatter `fetch` calls in components.
 - **Use TanStack Query** for reads and writes:
   - Reads → `useQuery` (e.g. `useQuery(["me"], () => authApi.me(accessToken))`).
   - Writes / multi-step flows → `useMutation` (with `onError` → `toast.error`).
+- **Investment profile**: the questionnaire answers are submitted via `authApi.submitQuestionnaire(accessToken, answers)` (a `useMutation` or inline call in the `onComplete` handler), then the `["me"]` query is refetched to sync the profile page. The profile page reads `meQuery.data.investmentProfile` and maps raw values to labels using `QUESTIONS` from `kyc/_components/questionnaire-data.ts`.
 - `QueryProvider` is already mounted in the `/app` layout. Add new providers there if a subtree needs them.
 - Return typed results from `lib/api.ts` (define an interface) — never `Promise<any>`.
 
@@ -182,17 +190,17 @@ Prettier ([`.prettierrc`](../.prettierrc)) is authoritative — run `pnpm format
 
 ## Do / Don't
 
-| Do | Don't |
-| --- | --- |
-| Reuse/add shadcn components | Hand-roll buttons, inputs, dialogs, tables |
-| Import via `@/…` alias | Deep relative imports (`../../..`) |
-| Put route UI in `_components/` | Dump large JSX/logic in `page.tsx` |
-| Logic in `use-*` hooks | Mix ceremony/mutation logic into JSX components |
-| Call the backend via `lib/api.ts` + Query | Ad-hoc `fetch()` in components |
-| Style with tokens (`bg-primary`, `bk-*`) | Raw hex/rgb, arbitrary color values |
-| `cn()` / `cva()` for classes | String-concatenated `className`s |
-| Type props & responses | `any` (use `unknown` + a real cast) |
-| `"use client"` only when needed | Blanket-marking pages client |
+| Do                                        | Don't                                           |
+| ----------------------------------------- | ----------------------------------------------- |
+| Reuse/add shadcn components               | Hand-roll buttons, inputs, dialogs, tables      |
+| Import via `@/…` alias                    | Deep relative imports (`../../..`)              |
+| Put route UI in `_components/`            | Dump large JSX/logic in `page.tsx`              |
+| Logic in `use-*` hooks                    | Mix ceremony/mutation logic into JSX components |
+| Call the backend via `lib/api.ts` + Query | Ad-hoc `fetch()` in components                  |
+| Style with tokens (`bg-primary`, `bk-*`)  | Raw hex/rgb, arbitrary color values             |
+| `cn()` / `cva()` for classes              | String-concatenated `className`s                |
+| Type props & responses                    | `any` (use `unknown` + a real cast)             |
+| `"use client"` only when needed           | Blanket-marking pages client                    |
 
 ---
 

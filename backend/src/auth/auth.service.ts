@@ -332,6 +332,7 @@ export class AuthService {
       email: user.email,
       role: user.role,
       kycStatus: user.kycStatus,
+      kybStatus: user.kybStatus,
       walletId: wallet?.dfnsWalletId,
       walletAddress: wallet?.address,
     };
@@ -370,10 +371,14 @@ export class AuthService {
       email: user.email,
       role: user.role,
       kycStatus: user.kycStatus,
+      kybStatus: user.kybStatus,
       firstName: user.firstName,
       lastName: user.lastName,
       walletId: wallet?.dfnsWalletId ?? null,
       walletAddress: wallet?.address ?? null,
+      companyName: user.companyName ?? null,
+      companyRegistrationNumber: user.companyRegistrationNumber ?? null,
+      companyCountry: user.companyCountry ?? null,
       investmentProfile: user.investmentProfile
         ? (user.investmentProfile.answers as Record<string, string | string[]>)
         : null,

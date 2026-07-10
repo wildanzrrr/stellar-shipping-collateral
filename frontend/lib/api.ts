@@ -60,6 +60,18 @@ export const KYC_STATUS_LABELS: Record<KycStatus, string> = {
   ON_HOLD: "On hold",
 }
 
+export type KybStatus =
+  "NOT_STARTED" | "INIT" | "PENDING" | "COMPLETED" | "REJECTED" | "ON_HOLD"
+
+export const KYB_STATUS_LABELS: Record<KybStatus, string> = {
+  NOT_STARTED: "Not started",
+  INIT: "In progress",
+  PENDING: "Pending review",
+  COMPLETED: "Verified",
+  REJECTED: "Rejected",
+  ON_HOLD: "On hold",
+}
+
 export type QuestionnaireAnswers = Record<string, string | string[]>
 
 export interface PublicUser {
@@ -67,10 +79,14 @@ export interface PublicUser {
   email: string
   role: UserRole
   kycStatus: KycStatus
+  kybStatus: KybStatus
   firstName?: string | null
   lastName?: string | null
   walletId?: string | null
   walletAddress?: string | null
+  companyName?: string | null
+  companyRegistrationNumber?: string | null
+  companyCountry?: string | null
   investmentProfile?: QuestionnaireAnswers | null
 }
 
@@ -260,5 +276,10 @@ export const sumsubApi = {
       method: "POST",
       headers: bearer(accessToken),
       body: JSON.stringify({ sessionId, applicantId }),
+    }),
+  getKybAccessToken: (accessToken: string) =>
+    req<SumsubAccessToken>("/sumsub/kyb-access-token", {
+      method: "POST",
+      headers: bearer(accessToken),
     }),
 }

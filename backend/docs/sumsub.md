@@ -1,6 +1,6 @@
-# Sumsub KYC Backend Integration
+# Sumsub KYC/KYB Backend Integration
 
-How the NestJS backend integrates with [Sumsub](https://sumsub.com/) to perform identity verification (KYC/KYB) on registered users. The backend generates scoped access tokens for the Sumsub WebSDK and receives verification results via signed webhooks.
+How the NestJS backend integrates with [Sumsub](https://sumsub.com/) to perform identity verification (KYC) and business verification (KYB) on registered users. The backend generates scoped access tokens for the Sumsub WebSDK and receives verification results via signed webhooks.
 
 ---
 
@@ -56,7 +56,8 @@ SUMSUB_LEVEL_NAME="basic-kyc"
 | `SUMSUB_SECRET_KEY`     | Dashboard → Settings → API → Secret Key                                               |
 | `SUMSUB_WEBHOOK_SECRET` | Dashboard → Webhooks → your webhook → secret                                          |
 | `SUMSUB_BASE_URL`       | `https://api.sumsub.com` (same for Sandbox and Production — switch mode in Dashboard) |
-| `SUMSUB_LEVEL_NAME`     | Dashboard → Verification Levels → level slug                                          |
+| `SUMSUB_LEVEL_NAME`     | Dashboard → Verification Levels → KYC level slug                                      |
+| `SUMSUB_KYB_LEVEL_NAME` | Dashboard → Verification Levels → KYB level slug (e.g. `registry-aml-check`)          |
 
 ### 2.3 Webhook URL requirements
 
@@ -197,7 +198,100 @@ The frontend uses `@sumsub/websdk-react` to launch the WebSDK:
 
 ---
 
-## 8. Notes & Gotchas
+## 8. KYB — Business Verification (Shipping Companies)
+
+KYB (Know Your Business) is a second verification tier for `SHIPPING_COMPANY` users. It runs **after** KYC is completed and uses a separate **Individuals** level (`kyb_registry`) — same level type as KYC but with different checks configured in the Sumsub Dashboard. This avoids the paid Companies / Registry-and-AML-Check feature.
+
+### 8.1 Flow
+
+```
+User registers (SHIPPING_COMPANY)
+  → KYC (individual identity verification)
+    → KYC COMPLETED
+      → KYB (company registry + AML checks)
+        → KYB COMPLETED → can tokenize RWAs
+```
+
+### 8.2 Sumsub Dashboard setup
+
+1. Create a **second Individuals verification level** in the Sumsub Dashboard:
+   - Dashboard → **Individuals** → Verification Levels → Create
+   - Name it `kyb_registry` (the slug goes into `SUMSUB_KYB_LEVEL_NAME`)
+   - Configure the checks you want for business verification (e.g. questionnaire, document upload, etc.)
+   - This is a regular Individuals level — same type as the KYC level `id-and-liveness`
+2. The same webhook endpoint handles both KYC and KYB events — no separate webhook needed.
+
+### 8.3 Webhook routing
+
+KYB events are distinguished from KYC events via the `externalUserId`:
+
+| Flow | `externalUserId` format | Example          |
+| ---- | ----------------------- | ---------------- |
+| KYC  | `{userId}`              | `usr-abc123`     |
+| KYB  | `{userId}:kyb`          | `usr-abc123:kyb` |
+
+The webhook handler in `sumsub.service.ts` checks for the `:kyb` suffix:
+
+- If present → routes to `handleKybWebhook()` which updates `kybStatus` and extracts company info
+- If absent → routes to the existing KYC handler which updates `kycStatus`
+
+### 8.4 Data model additions
+
+```prisma
+enum KybStatus {
+  NOT_STARTED
+  INIT
+  PENDING
+  COMPLETED
+  REJECTED
+  ON_HOLD
+}
+
+model User {
+  // …existing KYC fields…
+  kybStatus               KybStatus @default(NOT_STARTED)
+  sumsubKybApplicantId    String?   @unique
+  sumsubKybExternalUserId String?
+  companyName              String?
+  companyRegistrationNumber String?
+  companyCountry           String?
+  @@index([kybStatus])
+}
+```
+
+### 8.5 Endpoints
+
+#### `POST /api/v1/sumsub/kyb-access-token` 🔒
+
+Generates a Sumsub access token for KYB verification.
+
+- **Auth**: Bearer JWT (guarded by `JwtAuthGuard`)
+- **Guards**: User must be `SHIPPING_COMPANY` role, `kycStatus` must be `COMPLETED`, `kybStatus` must not be `COMPLETED`
+- **Body**: none
+- **Response**: `{ "token": "...", "externalUserId": "usr-abc:kyb" }`
+
+The service:
+
+1. Sends `POST /resources/accessTokens/sdk` with `userId = "{userId}:kyb"` and `levelName = SUMSUB_KYB_LEVEL_NAME`.
+2. If `kybStatus` was `NOT_STARTED`, upgrades it to `INIT`.
+
+#### Webhook (same endpoint as KYC)
+
+KYB webhook events use the same types (`applicantCreated`, `applicantPending`, `applicantReviewed`, etc.) but are routed based on the `:kyb` suffix. When `applicantReviewed` with `reviewAnswer = GREEN` arrives, company info (name, registration number, country) is extracted from the payload and saved to the user record.
+
+### 8.6 Frontend
+
+The frontend has a dedicated KYB page at `/app/profile/kyb`:
+
+1. Calls `sumsubApi.getKybAccessToken(accessToken)` to get the KYB SDK token.
+2. Launches `<SumsubWebSdk>` with the KYB token.
+3. Polls `/auth/me` to pick up `kybStatus` updates from the webhook.
+4. A KYB banner shows below the navbar when KYC is completed but KYB is not.
+5. The profile page shows a KYB status badge and business info for shipping companies.
+
+---
+
+## 9. Notes & Gotchas
 
 - **Webhook HTTPS**: Sumsub requires the webhook URL to be HTTPS. Use `ngrok http 2000` for local dev.
 - **Raw body**: `main.ts` mounts `raw({ type: '*/*' })` on the `/api/v1/sumsub/webhook` route to capture the exact request bytes into `req.rawBody` before JSON parsing. This is required because `useBodyParser('json', { rawBody: true })` does **not** populate `req.rawBody` in NestJS 11 / Express 4. The HMAC must be computed over the untouched bytes — `JSON.stringify(req.body)` produces different whitespace/key-ordering and will fail verification.

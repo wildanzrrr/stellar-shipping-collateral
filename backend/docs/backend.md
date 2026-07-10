@@ -59,22 +59,31 @@ backend/
     │   ├── dfns.module.ts        # @Global DFNS module
     │   ├── dfns.service.ts       # DfnsApiClient initialization (OnModuleInit)
     │   └── signer.ts             # makeSigner() — reads PEM, creates AsymmetricKeySigner
+    ├── auth/
+    │   ├── auth.module.ts        # imports JwtModule, UsersModule, DfnsModule, WalletsModule
+    │   ├── auth.controller.ts    # /api/v1/auth/* routes (register, login, refresh, me, logout, questionnaire)
+    │   ├── auth.service.ts       # DFNS orchestration + JWT issuance/rotation + wallet provisioning + questionnaire
+    │   ├── auth.dto.ts           # Register/Login/Refresh/Questionnaire DTOs (class-validator)
+    │   ├── jwt-auth.guard.ts     # Bearer access-token guard → req.user
+    │   └── jwt.types.ts          # AccessTokenPayload / RefreshTokenPayload / AuthTokens
+    ├── sumsub/
+    │   ├── sumsub.module.ts      # Sumsub KYC/KYB integration module
+    │   ├── sumsub.controller.ts  # /api/v1/sumsub/* routes (access token, webhook)
+    │   ├── sumsub.service.ts     # Sumsub API client + webhook signature verification
+    │   └── sumsub.dto.ts         # Sumsub DTOs
     ├── users/
     │   ├── users.module.ts
-    │   ├── users.controller.ts   # POST api/v1/users/register/init, register/complete, login/init, login/complete
-    │   ├── users.service.ts      # Business logic: register/login via DFNS + DB
-    │   ├── users.repository.ts   # All Prisma calls for User model
+    │   ├── users.repository.ts   # All Prisma calls for User + InvestmentProfile models
     │   └── users.dto.ts          # Request DTOs with class-validator + Swagger
     ├── wallets/
     │   ├── wallets.module.ts
     │   ├── wallets.controller.ts  # POST api/v1/wallets, /:walletId/delegate, /:walletId/sign/init, /:walletId/sign/complete
     │   ├── wallets.service.ts     # Business logic: create wallet, delegate, sign via DFNS + Stellar SDK
-    │   ├── wallets.repository.ts  # All Prisma calls for Wallet + SignSession models
-    │   └── wallets.dto.ts         # Request DTOs with class-validator + Swagger
+    │   └── wallets.repository.ts  # All Prisma calls for Wallet + SignSession models
     └── utils/
         ├── dto.ts                 # SuccessResponseDTO, BaseQueryDTO
         ├── utils.ts               # generateCustomId(), generateRandomString()
-        └── constant.ts            # DFNS_NETWORK, HORIZON_URL, FRIENDBOT_URL, ID_PREFIXES
+        └── constant.ts            # DFNS_NETWORK, HORIZON_URL, FRIENDBOT_URL, ID_PREFIXES, USDC asset
 ```
 
 ---
@@ -207,6 +216,14 @@ datasource db {
 - Relations: `wallet` (N:1), `user` (N:1)
 - Timestamps: `createdAt`, `updatedAt`, `deletedAt`
 
+**InvestmentProfile**
+
+- `id` (CUID), `userId` (unique, 1:1 with `User`)
+- `answers` (`Json`) — questionnaire answers as `Record<string, string | string[]>`
+- Relations: `user` (N:1)
+- Timestamps: `createdAt`, `updatedAt`
+- Index on `userId`
+
 ### `src/prisma.service.ts`
 
 Uses the `PrismaPg` adapter pattern for runtime connections:
@@ -330,6 +347,29 @@ export class UsersRepository {
   }
 }
 ```
+
+### Typed Includes (`UserWithRelations`)
+
+When a repository method uses `include`, the return type is a richer payload than the base `User`. Export a named type so services can access relations safely:
+
+```ts
+import { Prisma } from 'prisma/generated/prisma/client';
+
+export type UserWithRelations = Prisma.UserGetPayload<{
+  include: {
+    wallet: true;
+    signSession: true;
+    investmentProfile: true;
+  };
+}>;
+
+// Repository methods that include all relations return this type:
+async get(payload: Prisma.UserWhereInput): Promise<UserWithRelations | null> { … }
+async getByEmail(email: string): Promise<UserWithRelations | null> { … }
+async getByUsername(username: string): Promise<UserWithRelations | null> { … }
+```
+
+Services import `UserWithRelations` from the repository to type their own method signatures (e.g. `AuthService.publicUser(user: UserWithRelations, …)`).
 
 ---
 

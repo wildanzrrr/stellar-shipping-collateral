@@ -29,14 +29,14 @@ browser: passkey ceremony ──▶ BE returns { accessToken, refreshToken, user
                                           └─▶ proxy middleware gates /app
 ```
 
-| Concern | Choice |
-| --- | --- |
-| Session library | `next-auth@5` (Auth.js v5, Credentials provider) |
+| Concern         | Choice                                                  |
+| --------------- | ------------------------------------------------------- |
+| Session library | `next-auth@5` (Auth.js v5, Credentials provider)        |
 | Session storage | Encrypted JWT cookie (holds BE access + refresh tokens) |
-| Token refresh | Automatic in the `jwt` callback → BE `/auth/refresh` |
-| Route guard | `proxy.ts` (Next 16's `middleware` replacement) |
-| Data fetching | `@tanstack/react-query` |
-| Toasts | `sonner`, top-right |
+| Token refresh   | Automatic in the `jwt` callback → BE `/auth/refresh`    |
+| Route guard     | `proxy.ts` (Next 16's `middleware` replacement)         |
+| Data fetching   | `@tanstack/react-query`                                 |
+| Toasts          | `sonner`, top-right                                     |
 
 ---
 
@@ -61,7 +61,7 @@ frontend/
 │   ├── query-provider.tsx                # "use client" QueryClientProvider
 │   └── ui/sonner.tsx                     # Toaster (position="top-right")
 └── lib/
-    ├── api.ts                            # typed BE client (authApi + walletApi)
+│   ├── api.ts                            # typed BE client (authApi + walletApi + sumsubApi)
     └── dfns.ts                           # WebAuthnSigner (passkey)
 ```
 
@@ -119,12 +119,14 @@ export const { GET, POST } = handlers
 All ceremony + mutation logic lives in the [`useAuthFlow`](../app/app/auth/_components/use-auth-flow.ts) hook.
 
 **Login** (`completeLogin`):
+
 1. `authApi.loginInit(email)` → challenge.
 2. `webauthn.sign(challenge)` → passkey assertion.
 3. `authApi.loginComplete({ email, challengeIdentifier, firstFactor })` → tokens + user.
 4. `signIn("dfns", {...})` → NextAuth session, then `router.push(callbackUrl)`.
 
 **Register** (`registerFlow`):
+
 1. `authApi.registerInit({ email, role, firstName?, lastName? })`.
 2. If `{ alreadyRegistered }` → fall through to the login ceremony.
 3. `webauthn.create(challenge)` → passkey attestation.
@@ -139,14 +141,14 @@ Both are wrapped in `useMutation`; `busy = loginMutation.isPending || registerMu
 
 `app/app/auth/page.tsx` is intentionally thin — it only provides the `Suspense` boundary that `useSearchParams` needs and renders the orchestrator. Everything else is composed from `_components/`:
 
-| File | Responsibility |
-| --- | --- |
-| [`auth-panel.tsx`](../app/app/auth/_components/auth-panel.tsx) | Orchestrator: mode state, header, tabs, form, status |
-| [`mode-tabs.tsx`](../app/app/auth/_components/mode-tabs.tsx) | Sign in / Create account toggle |
-| [`auth-form.tsx`](../app/app/auth/_components/auth-form.tsx) | Email + (role + names in register mode) + submit; owns field state |
-| [`role-select.tsx`](../app/app/auth/_components/role-select.tsx) | Investor / Shipping Company picker |
+| File                                                               | Responsibility                                                        |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| [`auth-panel.tsx`](../app/app/auth/_components/auth-panel.tsx)     | Orchestrator: mode state, header, tabs, form, status                  |
+| [`mode-tabs.tsx`](../app/app/auth/_components/mode-tabs.tsx)       | Sign in / Create account toggle                                       |
+| [`auth-form.tsx`](../app/app/auth/_components/auth-form.tsx)       | Email + (role + names in register mode) + submit; owns field state    |
+| [`role-select.tsx`](../app/app/auth/_components/role-select.tsx)   | Investor / Shipping Company picker                                    |
 | [`use-auth-flow.ts`](../app/app/auth/_components/use-auth-flow.ts) | Passkey ceremonies + TanStack mutations + `status` (behavior, not UI) |
-| [`types.ts`](../app/app/auth/_components/types.ts) | `Mode` + `AuthFormValues` |
+| [`types.ts`](../app/app/auth/_components/types.ts)                 | `Mode` + `AuthFormValues`                                             |
 
 Rationale: visual blocks (`AuthForm`, `ModeTabs`, `RoleSelect`) stay pure and reusable; the DFNS/session logic is isolated in a hook. `page.tsx` is a server component (no `"use client"`).
 
@@ -156,10 +158,19 @@ Rationale: visual blocks (`AuthForm`, `ModeTabs`, `RoleSelect`) stay pure and re
 
 [`lib/api.ts`](../lib/api.ts) targets `${NEXT_PUBLIC_BACKEND_URL}/api/v1` and unwraps the BE's `{ data }` envelope. It surfaces validation-error arrays as a joined message. Fully typed (no `any`).
 
-- **`authApi`**: `registerInit`, `registerComplete`, `loginInit`, `loginComplete`, `me(accessToken)`.
+- **`authApi`**: `registerInit`, `registerComplete`, `loginInit`, `loginComplete`, `me(accessToken)`, `submitQuestionnaire(accessToken, answers)`, `refresh(refreshToken)`.
 - **`walletApi`** (all send `Authorization: Bearer <accessToken>`): `createWallet`, `delegateWallet`, `signInit`, `signComplete`.
+- **`sumsubApi`**: `getAccessToken(accessToken)` — fetches Sumsub WebSDK access token.
 
-Exports shared types (`UserRole`, `ROLE_LABELS`, `PublicUser`, `AuthResult`, `RegisterInitResult`, `LoginChallenge`, `WalletInfo`, `SignChallenge`, `SignResult`).
+Exports shared types (`UserRole`, `ROLE_LABELS`, `PublicUser`, `AuthResult`, `RegisterInitResult`, `LoginChallenge`, `WalletInfo`, `SignChallenge`, `SignResult`, `QuestionnaireAnswers`, `KycStatus`, `KYC_STATUS_LABELS`).
+
+### `QuestionnaireAnswers`
+
+```ts
+export type QuestionnaireAnswers = Record<string, string | string[]>
+```
+
+Added to `PublicUser` as `investmentProfile?: QuestionnaireAnswers | null`. The `submitQuestionnaire` method POSTs answers to `POST /auth/questionnaire` and returns `{ answers }` on success.
 
 ---
 
@@ -168,6 +179,7 @@ Exports shared types (`UserRole`, `ROLE_LABELS`, `PublicUser`, `AuthResult`, `Re
 [`components/query-provider.tsx`](../components/query-provider.tsx) creates one stable `QueryClient` (30s `staleTime`, `retry: 1`, no refetch-on-focus) and is mounted in the `/app` layout alongside `SessionProvider`.
 
 Usage:
+
 - Auth flows → `useMutation` (in `useAuthFlow`).
 - Dashboard current user/wallet → `useQuery(["me"], () => authApi.me(accessToken))`.
 - Message signing → `useMutation`.
@@ -208,6 +220,55 @@ NEXT_PUBLIC_BACKEND_URL=http://localhost:2000
 ```
 
 (Plus the existing `NEXT_PUBLIC_DFNS_*` vars used by the browser passkey signer — see [`dfns.md`](./dfns.md).)
+
+---
+
+## Investment Profile Questionnaire
+
+Before KYC verification, the user completes a 5-question investment profile questionnaire. The answers are stored on the backend and displayed on the profile page.
+
+### KYC Page (`/app/profile/kyc`)
+
+Two-phase flow: **questionnaire → transition → Sumsub verification**.
+
+```
+questionnaire phase
+  → user answers 5 questions (single + multi-select)
+  → onComplete: POST /auth/questionnaire { answers }
+  → refetch ["me"] query
+  → 1.5s transition (success animation)
+verification phase
+  → fetch Sumsub access token
+  → render <SumsubWebSdk/>
+```
+
+### Questionnaire Components
+
+Route-private components in `app/app/(protected)/profile/kyc/_components/`:
+
+| File                           | Responsibility                                                                                                             |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `questionnaire-data.ts`        | Question definitions, types (`QuestionKind`, `QuestionOption`, `Question`), `QUESTIONS` array (5 questions)                |
+| `investment-questionnaire.tsx` | Multi-step form (progress bar, single/multi-select, Back/Cancel, validation toast) + `QuestionnaireComplete` success state |
+
+The 5 questions:
+
+| ID                         | Title                                      | Kind          |
+| -------------------------- | ------------------------------------------ | ------------- |
+| `investor_type`            | What best describes you?                   | single-select |
+| `asset_familiarity`        | Which asset types are you familiar with?   | multi-select  |
+| `risk_appetite`            | How would you describe your risk appetite? | single-select |
+| `understanding_platform`   | How well do you understand the platform?   | single-select |
+| `understanding_collateral` | How well do you understand collateral?     | single-select |
+
+### Profile Page (`/app/profile`)
+
+Displays:
+
+- **Account card** — email, name, role badge, wallet address, KYC status badge (with "Verify now" link if not completed).
+- **Investment Profile card** — maps raw answer values to human-readable labels using `QUESTIONS` from `questionnaire-data.ts`, displayed as chips/badges. Shows "Retake questionnaire" link if profile exists, or "Start questionnaire" if not.
+
+The profile page fetches `["me"]` (which includes `investmentProfile` from the backend) and uses an `answerLabels()` helper to map raw values to display labels.
 
 ---
 
