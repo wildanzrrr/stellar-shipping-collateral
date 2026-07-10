@@ -4,6 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "setup": "cd lib/packages/compliance && pnpm i --save-dev @types/node && cd ../factory && pnpm i --save-dev @types/node && cd ../identity_verifier && pnpm i --save-dev @types/node && cd ../sep57 && pnpm i --save-dev @types/node",
     "dev": "rm -rf .next && next dev",
     "build": "next build",
     "start": "next start",
