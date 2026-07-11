@@ -33,11 +33,11 @@ initializeFactory:
 	stellar contract invoke --network $(NETWORK) --source-account $(SOURCE_ACCOUNT) --id $(FACTORY_ADDRESS) -- initialize --admin $(ADMIN_ADDRESS) --identity_verifier $(IDENTITY_ADDRESS) --compliance $(COMPLIANCE_ADDRESS) --usdc $(USDC_ADDRESS) --admin_signer $(ADMIN_SIGNER) --protocol_fee_bps $(FACTORY_PROTOCOL_FEE_BPS) --sep57_wasm_hash $(SEP57_WASM_HASH)
 
 bindings:
-	stellar contract bindings typescript --network $(NETWORK) --contract-id identity_verifier --output-dir ../backend/src/packages/identity_verifier
-	stellar contract bindings typescript --network $(NETWORK) --contract-id compliance --output-dir ../backend/src/packages/compliance
-	stellar contract bindings typescript --network $(NETWORK) --contract-id factory --output-dir ../backend/src/packages/factory
-	stellar contract bindings typescript --network $(NETWORK) --contract-id sep57 --output-dir ../backend/src/packages/sep57
-	stellar contract bindings typescript --network $(NETWORK) --contract-id identity_verifier --output-dir ../frontend/lib/packages/identity_verifier
-	stellar contract bindings typescript --network $(NETWORK) --contract-id compliance --output-dir ../frontend/lib/packages/compliance
-	stellar contract bindings typescript --network $(NETWORK) --contract-id factory --output-dir ../frontend/lib/packages/factory
-	stellar contract bindings typescript --network $(NETWORK) --contract-id sep57 --output-dir ../frontend/lib/packages/sep57
+	stellar contract bindings typescript --network $(NETWORK) --contract-id identity_verifier --overwrite --output-dir ../backend/src/packages/identity_verifier
+	stellar contract bindings typescript --network $(NETWORK) --contract-id compliance --overwrite --output-dir ../backend/src/packages/compliance
+	stellar contract bindings typescript --network $(NETWORK) --contract-id factory --overwrite --output-dir ../backend/src/packages/factory
+	stellar contract bindings typescript --network $(NETWORK) --contract-id sep57 --overwrite --output-dir ../backend/src/packages/sep57
+	stellar contract bindings typescript --network $(NETWORK) --contract-id identity_verifier --overwrite --output-dir ../frontend/lib/packages/identity_verifier
+	stellar contract bindings typescript --network $(NETWORK) --contract-id compliance --overwrite --output-dir ../frontend/lib/packages/compliance
+	stellar contract bindings typescript --network $(NETWORK) --contract-id factory --overwrite --output-dir ../frontend/lib/packages/factory
+	stellar contract bindings typescript --network $(NETWORK) --contract-id sep57 --overwrite --output-dir ../frontend/lib/packages/sep57

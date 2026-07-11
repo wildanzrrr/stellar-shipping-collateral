@@ -60,10 +60,13 @@ frontend/
 │       ├── page.tsx              # dashboard (role-aware)
 │       ├── (protected)/
 │       │   └── profile/
-│       │       ├── page.tsx          # user profile (account + investment profile)
-│       │       └── kyc/
-│       │           ├── page.tsx          # KYC: questionnaire → Sumsub WebSDK
-│       │           └── _components/      # questionnaire-data.ts, investment-questionnaire.tsx
+│       │       ├── page.tsx          # user profile (account + investment/business profile)
+│       │       ├── kyc/
+│       │       │   ├── page.tsx          # KYC: questionnaire → Sumsub WebSDK
+│       │       │   └── _components/      # questionnaire-data.ts, investment-questionnaire.tsx
+│       │       └── kyb/
+│       │           ├── page.tsx          # KYB: questionnaire → Sumsub WebSDK
+│       │           └── _components/      # questionnaire-data.ts (BUSINESS_QUESTIONS)
 │       └── auth/
 │           ├── page.tsx          # thin composer
 │           └── _components/      # route-private building blocks
@@ -150,6 +153,8 @@ Rules:
   - Reads → `useQuery` (e.g. `useQuery(["me"], () => authApi.me(accessToken))`).
   - Writes / multi-step flows → `useMutation` (with `onError` → `toast.error`).
 - **Investment profile**: the questionnaire answers are submitted via `authApi.submitQuestionnaire(accessToken, answers)` (a `useMutation` or inline call in the `onComplete` handler), then the `["me"]` query is refetched to sync the profile page. The profile page reads `meQuery.data.investmentProfile` and maps raw values to labels using `QUESTIONS` from `kyc/_components/questionnaire-data.ts`.
+- **Business profile**: the business questionnaire answers are submitted via `authApi.submitBusinessQuestionnaire(accessToken, answers)` (same pattern). The profile page reads `meQuery.data.businessProfile` and maps raw values to labels using `BUSINESS_QUESTIONS` from `kyb/_components/questionnaire-data.ts`.
+- The `InvestmentQuestionnaire` component accepts `questions` and `ctaLabel` props, so both KYC and KYB pages reuse it with different question sets.
 - `QueryProvider` is already mounted in the `/app` layout. Add new providers there if a subtree needs them.
 - Return typed results from `lib/api.ts` (define an interface) — never `Promise<any>`.
 

@@ -200,17 +200,23 @@ The frontend uses `@sumsub/websdk-react` to launch the WebSDK:
 
 ## 8. KYB — Business Verification (Shipping Companies)
 
-KYB (Know Your Business) is a second verification tier for `SHIPPING_COMPANY` users. It runs **after** KYC is completed and uses a separate **Individuals** level (`kyb_registry`) — same level type as KYC but with different checks configured in the Sumsub Dashboard. This avoids the paid Companies / Registry-and-AML-Check feature.
+KYB (Know Your Business) is a second verification tier for `SHIPPING_COMPANY` users. Shipping companies **skip KYC entirely** and go straight to KYB, using a separate **Individuals** level (`kyb_registry`) — same level type as KYC but with different checks configured in the Sumsub Dashboard. This avoids the paid Companies / Registry-and-AML-Check feature.
 
 ### 8.1 Flow
 
 ```
 User registers (SHIPPING_COMPANY)
-  → KYC (individual identity verification)
-    → KYC COMPLETED
-      → KYB (company registry + AML checks)
-        → KYB COMPLETED → can tokenize RWAs
+  → Business questionnaire (5 questions about shipping operations)
+    → KYB (company registry + AML checks)
+      → KYB COMPLETED → can tokenize RWAs
+
+User registers (INVESTOR)
+  → Investment questionnaire (5 questions about investor profile)
+    → KYC (individual identity verification)
+      → KYC COMPLETED → full access
 ```
+
+Shipping companies skip KYC — they do not need individual identity verification, only business verification. The KYB flow mirrors the KYC flow: a questionnaire phase first, then the Sumsub WebSDK.
 
 ### 8.2 Sumsub Dashboard setup
 
@@ -266,7 +272,7 @@ model User {
 Generates a Sumsub access token for KYB verification.
 
 - **Auth**: Bearer JWT (guarded by `JwtAuthGuard`)
-- **Guards**: User must be `SHIPPING_COMPANY` role, `kycStatus` must be `COMPLETED`, `kybStatus` must not be `COMPLETED`
+- **Guards**: User must be `SHIPPING_COMPANY` role, `kybStatus` must not be `COMPLETED`. (KYC is **not** required — shipping companies skip KYC entirely.)
 - **Body**: none
 - **Response**: `{ "token": "...", "externalUserId": "usr-abc:kyb" }`
 

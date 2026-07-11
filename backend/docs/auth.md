@@ -67,11 +67,22 @@ model User {
   userAuthToken    String?              // DFNS end-user token (from login)
   refreshTokenHash String?              // SHA-256 of the current refresh token
   wallet           Wallet?
-  investmentProfile InvestmentProfile?  // 1:1 — questionnaire answers
+  investmentProfile InvestmentProfile?  // 1:1 — investor questionnaire answers (KYC flow)
+  businessProfile  BusinessProfile?    // 1:1 — business questionnaire answers (KYB flow)
   // ...
 }
 
 model InvestmentProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  answers   Json     // Record<string, string | string[]>
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([userId])
+}
+
+model BusinessProfile {
   id        String   @id @default(cuid())
   userId    String   @unique
   user      User     @relation(fields: [userId], references: [id])
@@ -88,6 +99,7 @@ Migrations:
 - `20260708130000_add_user_role` — `UserRole` enum + `role` column (default `INVESTOR`).
 - `20260708140000_add_kyc_fields` — `kycStatus`, `sumsubApplicantId`, `sumsubExternalUserId`.
 - `20260710174103_add_investment_profile` — `InvestmentProfile` model (1:1 with User).
+- `20260711043220_add_business_profile` — `BusinessProfile` model (1:1 with User, for KYB flow).
 
 The role default exists only for migration safety — **registration always sets the role explicitly**.
 
@@ -122,8 +134,7 @@ All under the `api/v1/auth` prefix. Every response is the standard `{ success, m
 | POST   | `/login/complete`    | —      | `{ email, challengeIdentifier, firstFactor }`                    | `{ accessToken, refreshToken, expiresIn, user }`                 |
 | POST   | `/refresh`           | —      | `{ refreshToken }`                                               | `{ accessToken, refreshToken, expiresIn, user }`                 |
 | GET    | `/me`                | Bearer | —                                                                | `user`                                                           |
-| POST   | `/questionnaire`     | Bearer | `{ answers: Record<string, string \| string[]> }`                | `{ answers: Record<string, string \| string[]> }`                |
-| POST   | `/logout`            | Bearer | —                                                                | `{ loggedOut: true }`                                            |
+| POST   | `/questionnaire`     | Bearer | `{ answers: Record<string, string \| string[]> }`                | `{ answers: Record<string, string \| string[]> }`                |     | POST | `/business-questionnaire` | Bearer | `{ answers: Record<string, string | string[]> }` | `{ answers: Record<string, string | string[]> }` |     | POST | `/logout` | Bearer | —   | `{ loggedOut: true }` |
 
 `user` (public shape):
 
@@ -137,12 +148,20 @@ All under the `api/v1/auth` prefix. Every response is the standard `{ success, m
   "walletId": "wa-…", // DFNS wallet id, null until provisioned
   "walletAddress": "G…", // Stellar address, null until provisioned
   "investmentProfile": {
-    // questionnaire answers, null if not yet submitted
+    // investor questionnaire answers, null if not yet submitted
     "investor_type": "individual",
     "asset_familiarity": ["stocks", "crypto"],
     "risk_appetite": "moderate",
     "understanding_platform": "basic",
     "understanding_collateral": "basic",
+  },
+  "businessProfile": {
+    // business questionnaire answers, null if not yet submitted
+    "business_type": "container",
+    "fleet_size": "6-20",
+    "trade_routes": ["intra_asia", "trans_pacific"],
+    "annual_revenue": "1m_10m",
+    "use_of_funds": "working_capital",
   },
 }
 ```
@@ -250,7 +269,31 @@ The `publicUser()` helper in `AuthService` maps the Prisma `User` (with relation
 
 ### `UserWithRelations` type
 
-The `get()`, `getByEmail()`, and `getByUsername()` repository methods return `UserWithRelations` — a `Prisma.UserGetPayload<{ include: { wallet, signSession, investmentProfile } }>` — so that `publicUser()` can access `user.investmentProfile` with full type safety. This type is exported from `UsersRepository` and imported by `AuthService`.
+The `get()`, `getByEmail()`, and `getByUsername()` repository methods return `UserWithRelations` — a `Prisma.UserGetPayload<{ include: { wallet, signSession, investmentProfile, businessProfile } }>` — so that `publicUser()` can access `user.investmentProfile` and `user.businessProfile` with full type safety. This type is exported from `UsersRepository` and imported by `AuthService`.
+
+---
+
+## Business Profile Questionnaire
+
+Before KYB verification, the frontend collects a 5-question business profile (business type, fleet size, trade routes, annual revenue, use of funds). This is the KYB equivalent of the investment profile questionnaire — it helps build a picture of the shipping company's operations before verification. Answers are single-select or multi-select and stored as a `Record<string, string | string[]>` JSON.
+
+### Endpoint
+
+`POST /api/v1/auth/business-questionnaire` (Bearer-protected) — accepts `{ answers }` and upserts the user's `BusinessProfile` (1:1 relation, keyed by `userId`).
+
+### Data Flow
+
+```
+FE business questionnaire form
+  → POST /auth/business-questionnaire { answers: Record<string, string | string[]> }
+  → UsersRepository.upsertBusinessProfile(userId, answers)
+  → BusinessProfile row (create or update)
+  → FE refetches /auth/me → publicUser now includes businessProfile
+```
+
+### `publicUser` shape
+
+The `publicUser()` helper in `AuthService` maps the Prisma `User` (with relations) to the public API shape. It casts `businessProfile.answers` from `Json` to `Record<string, string | string[]>` (or `null` if not yet submitted).
 
 ---
 

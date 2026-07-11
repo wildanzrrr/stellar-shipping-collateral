@@ -41,7 +41,7 @@ backend/
 │   ├── auth/                  # Authentication (DFNS + JWT + questionnaire)
 │   ├── dfns/                  # DFNS API client (global module)
 │   ├── sumsub/                # Sumsub KYC integration
-│   ├── users/                 # User repository (User + InvestmentProfile)
+│   ├── users/                 # User repository (User + InvestmentProfile + BusinessProfile)
 │   ├── wallets/               # Wallet + SignSession CRUD
 │   ├── packages/              # Domain packages (compliance, factory, etc.)
 │   └── utils/                 # Shared DTOs, constants, helpers
@@ -87,6 +87,7 @@ export type UserWithRelations = Prisma.UserGetPayload<{
     wallet: true;
     signSession: true;
     investmentProfile: true;
+    businessProfile: true;
   };
 }>;
 ```
@@ -97,12 +98,13 @@ Services import this type to type their method signatures (e.g. `AuthService.pub
 
 ## Key Models
 
-| Model               | Purpose                                                             |
-| ------------------- | ------------------------------------------------------------------- |
-| `User`              | Core user (email, role, DFNS identity, KYC status, wallet relation) |
-| `Wallet`            | Stellar wallet (DFNS wallet ID, address, delegation state)          |
-| `SignSession`       | Message signing sessions (initiated → signed)                       |
-| `InvestmentProfile` | 1:1 with User — questionnaire answers as JSON                       |
+| Model               | Purpose                                                                 |
+| ------------------- | ----------------------------------------------------------------------- |
+| `User`              | Core user (email, role, DFNS identity, KYC/KYB status, wallet relation) |
+| `Wallet`            | Stellar wallet (DFNS wallet ID, address, delegation state)              |
+| `SignSession`       | Message signing sessions (initiated → signed)                           |
+| `InvestmentProfile` | 1:1 with User — investor questionnaire answers as JSON (KYC flow)       |
+| `BusinessProfile`   | 1:1 with User — business questionnaire answers as JSON (KYB flow)       |
 
 ---
 

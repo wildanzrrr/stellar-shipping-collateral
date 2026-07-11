@@ -151,23 +151,39 @@ Without this, the WebSDK's liveness/document capture will fail with "Permission 
 
 ## 9. KYB — Business Verification (Shipping Companies)
 
-KYB is a second verification tier for `SHIPPING_COMPANY` users, run **after** KYC completes. It uses a separate Individuals level (`kyb_registry`) — same level type as KYC but with different checks configured in the Sumsub Dashboard. This avoids the paid Companies/Registry-and-AML-Check feature.
+KYB is the verification tier for `SHIPPING_COMPANY` users. Shipping companies **skip KYC entirely** and go straight to KYB, using a separate Individuals level (`kyb_registry`) — same level type as KYC but with different checks configured in the Sumsub Dashboard. This avoids the paid Companies/Registry-and-AML-Check feature.
 
 ### KYB banner
 
-When a `SHIPPING_COMPANY` user has `kycStatus === 'COMPLETED'` but `kybStatus !== 'COMPLETED'`, a KYB-specific banner appears (same component as KYC banner, with KYB messaging and a link to `/app/profile/kyb`).
+When a `SHIPPING_COMPANY` user has `kybStatus !== 'COMPLETED'`, a KYB-specific banner appears (same component as KYC banner, with KYB messaging and a link to `/app/profile/kyb`). KYC is not required — the banner shows as soon as the shipping company signs in.
 
 ### KYB page (`/app/profile/kyb`)
 
-Same WebSDK pattern as the KYC page, but:
+Two-phase flow (mirrors the KYC page): **questionnaire → transition → Sumsub verification**.
 
-- Calls `sumsubApi.getKybAccessToken(accessToken)` instead of `getAccessToken`.
-- No investment questionnaire phase — goes straight to the WebSDK.
-- Guards: redirects to KYC page if `kycStatus !== 'COMPLETED'`.
+```
+questionnaire phase
+  → user answers 5 business questions (single + multi-select)
+  → onComplete: POST /auth/business-questionnaire { answers }
+  → refetch ["me"] query
+  → 1.5s transition (success animation)
+verification phase
+  → fetch Sumsub KYB access token
+  → render <SumsubWebSdk/>
+```
+
+- Calls `sumsubApi.getKybAccessToken(accessToken)` for the Sumsub token.
+- Reuses the `InvestmentQuestionnaire` component with `BUSINESS_QUESTIONS` and `ctaLabel="Continue to KYB"`.
+- Guards: user must be `SHIPPING_COMPANY` role, `kybStatus` must not be `COMPLETED`. No KYC requirement.
 
 ### Profile page updates
 
-The profile page shows a `KYB status` badge (in addition to `KYC status`) for shipping company users, plus a business info card with company name, registration number, and country (populated from the KYB webhook).
+The profile page shows:
+
+- A `KYB status` badge for shipping company users (instead of KYC status).
+- A **Business Profile card** (shipping companies only) with questionnaire answers displayed as chips.
+- A **Business info card** with company name, registration number, and country (populated from the KYB webhook).
+- The Investment Profile card is **investors only** — not shown for shipping companies.
 
 ### Data flow
 
@@ -177,8 +193,11 @@ sequenceDiagram
   participant BE as Backend
   participant SS as Sumsub
 
+  FE->>FE: Business questionnaire (5 questions)
+  FE->>BE: POST /auth/business-questionnaire { answers }
+  BE-->>FE: { answers }
   FE->>BE: POST /sumsub/kyb-access-token (JWT)
-  BE->>BE: Verify role=SHIPPING_COMPANY + kycStatus=COMPLETED
+  BE->>BE: Verify role=SHIPPING_COMPANY + kybStatus!=COMPLETED
   BE->>SS: POST /resources/accessTokens/sdk (levelName=KYB, userId="{uid}:kyb")
   SS-->>BE: { token, userId }
   BE-->>FE: { token, externalUserId }
@@ -194,12 +213,15 @@ sequenceDiagram
 
 ```
 frontend/
-├── lib/api.ts                    # KybStatus type, KYB_STATUS_LABELS, sumsubApi.getKybAccessToken()
+├── lib/api.ts                    # KybStatus type, KYB_STATUS_LABELS, sumsubApi.getKybAccessToken(), authApi.submitBusinessQuestionnaire()
 ├── auth.ts                       # kybStatus propagated through NextAuth
 ├── types/next-auth.d.ts          # KybStatus added to Session/User/JWT
-├── components/app/kyc-banner.tsx  # KYB banner logic
-├── app/app/(protected)/profile/kyb/page.tsx  # KYB WebSDK page
-└── app/app/(protected)/profile/page.tsx      # KYB badge + business info
+├── components/app/kyc-banner.tsx  # KYB banner logic (no KYC requirement)
+├── app/app/(protected)/profile/kyb/
+│   ├── page.tsx                  # KYB: questionnaire → Sumsub WebSDK
+│   └── _components/
+│       └── questionnaire-data.ts # BUSINESS_QUESTIONS (5 business questions)
+└── app/app/(protected)/profile/page.tsx  # KYB badge + business profile + business info
 ```
 
 ---
@@ -210,4 +232,4 @@ frontend/
 - The `@sumsub/websdk-react` package (v2.6.3+) is the React wrapper for WebSDK 2.0.
 - Token expiration is handled by `expirationHandler`, which fetches a fresh token from the backend.
 - **Email pre-fill**: The backend passes `applicantIdentifiers: { email }` in the access token request so the WebSDK skips the "enter email" step and pre-fills it automatically.
-- **Iframe height**: The SDK container uses `style={{ height: "85vh" }}` to give the iframe enough vertical space for the full verification flow.
+- **Iframe height**: The SDK container uses `style={{ minHeight: "85vh" }}` (not `height`) so the iframe can grow beyond the viewport if needed, preventing content clipping inside the widget.

@@ -158,11 +158,11 @@ Rationale: visual blocks (`AuthForm`, `ModeTabs`, `RoleSelect`) stay pure and re
 
 [`lib/api.ts`](../lib/api.ts) targets `${NEXT_PUBLIC_BACKEND_URL}/api/v1` and unwraps the BE's `{ data }` envelope. It surfaces validation-error arrays as a joined message. Fully typed (no `any`).
 
-- **`authApi`**: `registerInit`, `registerComplete`, `loginInit`, `loginComplete`, `me(accessToken)`, `submitQuestionnaire(accessToken, answers)`, `refresh(refreshToken)`.
+- **`authApi`**: `registerInit`, `registerComplete`, `loginInit`, `loginComplete`, `me(accessToken)`, `submitQuestionnaire(accessToken, answers)`, `submitBusinessQuestionnaire(accessToken, answers)`, `refresh(refreshToken)`.
 - **`walletApi`** (all send `Authorization: Bearer <accessToken>`): `createWallet`, `delegateWallet`, `signInit`, `signComplete`.
 - **`sumsubApi`**: `getAccessToken(accessToken)` — fetches Sumsub WebSDK access token.
 
-Exports shared types (`UserRole`, `ROLE_LABELS`, `PublicUser`, `AuthResult`, `RegisterInitResult`, `LoginChallenge`, `WalletInfo`, `SignChallenge`, `SignResult`, `QuestionnaireAnswers`, `KycStatus`, `KYC_STATUS_LABELS`).
+Exports shared types (`UserRole`, `ROLE_LABELS`, `PublicUser`, `AuthResult`, `RegisterInitResult`, `LoginChallenge`, `WalletInfo`, `SignChallenge`, `SignResult`, `QuestionnaireAnswers`, `KycStatus`, `KYC_STATUS_LABELS`, `KybStatus`, `KYB_STATUS_LABELS`).
 
 ### `QuestionnaireAnswers`
 
@@ -170,7 +170,7 @@ Exports shared types (`UserRole`, `ROLE_LABELS`, `PublicUser`, `AuthResult`, `Re
 export type QuestionnaireAnswers = Record<string, string | string[]>
 ```
 
-Added to `PublicUser` as `investmentProfile?: QuestionnaireAnswers | null`. The `submitQuestionnaire` method POSTs answers to `POST /auth/questionnaire` and returns `{ answers }` on success.
+Added to `PublicUser` as `investmentProfile?: QuestionnaireAnswers | null` (investors) and `businessProfile?: QuestionnaireAnswers | null` (shipping companies). The `submitQuestionnaire` method POSTs answers to `POST /auth/questionnaire`; `submitBusinessQuestionnaire` POSTs to `POST /auth/business-questionnaire`. Both return `{ answers }` on success.
 
 ---
 
@@ -225,7 +225,7 @@ NEXT_PUBLIC_BACKEND_URL=http://localhost:2000
 
 ## Investment Profile Questionnaire
 
-Before KYC verification, the user completes a 5-question investment profile questionnaire. The answers are stored on the backend and displayed on the profile page.
+Before KYC verification, **investors** complete a 5-question investment profile questionnaire. The answers are stored on the backend and displayed on the profile page.
 
 ### KYC Page (`/app/profile/kyc`)
 
@@ -242,6 +242,8 @@ verification phase
   → render <SumsubWebSdk/>
 ```
 
+Shipping companies are redirected to the KYB page (they skip KYC entirely).
+
 ### Questionnaire Components
 
 Route-private components in `app/app/(protected)/profile/kyc/_components/`:
@@ -251,7 +253,9 @@ Route-private components in `app/app/(protected)/profile/kyc/_components/`:
 | `questionnaire-data.ts`        | Question definitions, types (`QuestionKind`, `QuestionOption`, `Question`), `QUESTIONS` array (5 questions)                |
 | `investment-questionnaire.tsx` | Multi-step form (progress bar, single/multi-select, Back/Cancel, validation toast) + `QuestionnaireComplete` success state |
 
-The 5 questions:
+The component accepts `questions` and `ctaLabel` as optional props (defaults to investor questions + "Continue to KYC"), so the KYB page can reuse it with business questions.
+
+The 5 investor questions:
 
 | ID                         | Title                                      | Kind          |
 | -------------------------- | ------------------------------------------ | ------------- |
@@ -261,14 +265,57 @@ The 5 questions:
 | `understanding_platform`   | How well do you understand the platform?   | single-select |
 | `understanding_collateral` | How well do you understand collateral?     | single-select |
 
-### Profile Page (`/app/profile`)
+---
 
-Displays:
+## Business Profile Questionnaire
 
-- **Account card** — email, name, role badge, wallet address, KYC status badge (with "Verify now" link if not completed).
-- **Investment Profile card** — maps raw answer values to human-readable labels using `QUESTIONS` from `questionnaire-data.ts`, displayed as chips/badges. Shows "Retake questionnaire" link if profile exists, or "Start questionnaire" if not.
+Before KYB verification, **shipping companies** complete a 5-question business profile questionnaire. This mirrors the investment profile questionnaire but covers business operations instead of investor profiling. The `InvestmentQuestionnaire` component is reused with different questions and a "Continue to KYB" CTA.
 
-The profile page fetches `["me"]` (which includes `investmentProfile` from the backend) and uses an `answerLabels()` helper to map raw values to display labels.
+### KYB Page (`/app/profile/kyb`)
+
+Two-phase flow (mirrors KYC): **questionnaire → transition → Sumsub verification**.
+
+```
+questionnaire phase
+  → user answers 5 business questions (single + multi-select)
+  → onComplete: POST /auth/business-questionnaire { answers }
+  → refetch ["me"] query
+  → 1.5s transition (success animation)
+verification phase
+  → fetch Sumsub KYB access token
+  → render <SumsubWebSdk/>
+```
+
+### Business Questionnaire Data
+
+Route-private components in `app/app/(protected)/profile/kyb/_components/`:
+
+| File                    | Responsibility                                                                     |
+| ----------------------- | ---------------------------------------------------------------------------------- |
+| `questionnaire-data.ts` | `BUSINESS_QUESTIONS` array (5 business questions), reuses `Question` type from KYC |
+
+The 5 business questions:
+
+| ID               | Title                                           | Kind          |
+| ---------------- | ----------------------------------------------- | ------------- |
+| `business_type`  | What type of shipping business do you operate?  | single-select |
+| `fleet_size`     | How many vessels or vehicles are in your fleet? | single-select |
+| `trade_routes`   | Which trade routes do you primarily operate?    | multi-select  |
+| `annual_revenue` | What is your approximate annual revenue?        | single-select |
+| `use_of_funds`   | How do you plan to use Bunkr financing?         | single-select |
+
+---
+
+## Profile Page (`/app/profile`)
+
+Displays role-conditional cards:
+
+- **Account card** — email, name, role badge, wallet address, KYC/KYB status badge (with "Verify now" link if not completed).
+- **Investment Profile card** (investors only) — maps raw answer values to human-readable labels using `QUESTIONS` from `questionnaire-data.ts`, displayed as chips/badges. Shows "Retake questionnaire" link if profile exists, or "Start questionnaire" if not.
+- **Business Profile card** (shipping companies only) — same pattern, maps `BUSINESS_QUESTIONS` answers to labels. "Retake questionnaire" links to `/app/profile/kyb`.
+- **Business info card** (shipping companies with `companyName`) — company name, registration number, country (populated from the KYB webhook).
+
+The profile page fetches `["me"]` (which includes `investmentProfile` and `businessProfile` from the backend) and uses an `answerLabels()` helper that accepts a questions array to map raw values to display labels for either questionnaire type.
 
 ---
 
