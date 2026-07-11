@@ -28,6 +28,8 @@ async function bootstrap() {
     'SUMSUB_KYC_LEVEL_NAME',
     // Sumsub KYB (business verification for SHIPPING_COMPANY users)
     'SUMSUB_KYB_LEVEL_NAME',
+    // Stellar admin wallet (signs on-chain set_identity transactions)
+    'ADMIN_SECRET',
   ];
 
   const missingEnvVars = requiredEnvVars.filter(

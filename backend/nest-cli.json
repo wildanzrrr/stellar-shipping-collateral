@@ -8,6 +8,10 @@
       {
         "include": "config/**/*",
         "outDir": "dist"
+      },
+      {
+        "include": "packages/identity_verifier/dist/**/*",
+        "outDir": "dist/src"
       }
     ],
     "watchAssets": true

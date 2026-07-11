@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { UsersRepository } from 'src/users/users.repository';
 import { SuccessResponseDTO } from 'src/utils/dto';
+import { BlockchainService } from 'src/blockchain/blockchain.service';
 import { SumsubWebhookPayload } from './sumsub.dto';
 import { KycStatus, KybStatus, UserRole } from 'prisma/generated/prisma/client';
 
@@ -33,6 +34,7 @@ export class SumsubService {
   constructor(
     private readonly config: ConfigService,
     private readonly users: UsersRepository,
+    private readonly blockchain: BlockchainService,
   ) {}
 
   /**
@@ -327,6 +329,21 @@ export class SumsubService {
       this.logger.log(
         `KYC status updated → user=${user.id} status=${update.kycStatus}`,
       );
+
+      // Sync to on-chain identity-verifier when verification completes or
+      // is rejected. Non-blocking — the off-chain DB is the source of truth
+      // for the webhook response; on-chain sync failure is logged but
+      // doesn't cause a webhook failure (Sumsub would retry otherwise).
+      if (
+        update.kycStatus === KycStatus.COMPLETED ||
+        update.kycStatus === KycStatus.REJECTED
+      ) {
+        // Re-fetch the user with relations (wallet) for the on-chain call.
+        const updatedUser = await this.users.get({ id: user.id });
+        if (updatedUser) {
+          await this.blockchain.syncKycStatus(updatedUser, update.kycStatus);
+        }
+      }
     } else if (update.sumsubApplicantId) {
       await this.users.update(user.id, update);
     }
@@ -409,6 +426,18 @@ export class SumsubService {
       this.logger.log(
         `KYB status updated → user=${user.id} status=${update.kybStatus}`,
       );
+
+      // Sync to on-chain identity-verifier when KYB verification completes
+      // or is rejected. Non-blocking — see KYC handler for rationale.
+      if (
+        update.kybStatus === KybStatus.COMPLETED ||
+        update.kybStatus === KybStatus.REJECTED
+      ) {
+        const updatedUser = await this.users.get({ id: user.id });
+        if (updatedUser) {
+          await this.blockchain.syncKybStatus(updatedUser, update.kybStatus);
+        }
+      }
     } else if (update.sumsubKybApplicantId) {
       await this.users.update(user.id, update);
     }

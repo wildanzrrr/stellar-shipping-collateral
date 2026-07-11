@@ -3,12 +3,13 @@ import { JwtModule } from '@nestjs/jwt';
 import { SumsubController, SumsubWebhookController } from './sumsub.controller';
 import { SumsubService } from './sumsub.service';
 import { UsersModule } from 'src/users/users.module';
+import { BlockchainModule } from 'src/blockchain/blockchain.module';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 
 @Module({
   // JwtModule + JwtAuthGuard so the access-token endpoint can be guarded
   // without importing AuthModule (avoids circular deps — same pattern as WalletsModule).
-  imports: [UsersModule, JwtModule.register({})],
+  imports: [UsersModule, BlockchainModule, JwtModule.register({})],
   providers: [SumsubService, JwtAuthGuard],
   controllers: [SumsubController, SumsubWebhookController],
   exports: [SumsubService],
