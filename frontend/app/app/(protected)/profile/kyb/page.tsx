@@ -19,17 +19,14 @@ import {
   KYB_STATUS_LABELS,
   sumsubApi,
   type KybStatus,
-  type KycStatus,
 } from "@/lib/api"
 
 /**
  * KYB (business verification) page — Sumsub WebSDK.
  *
- * Only accessible to SHIPPING_COMPANY users who have completed KYC.
- * Uses a separate Individuals level (`kyb_registry`) with its own checks
+ * Shipping companies skip KYC and go straight to KYB. Uses an Individuals
+ * level (`kyb_registry`) with KYB-specific checks (e.g. questionnaire)
  * configured in the Sumsub Dashboard. The webhook updates `kybStatus`.
- *
- * No investment questionnaire — that's KYC-only.
  */
 export default function KybPage() {
   const router = useRouter()
@@ -47,9 +44,6 @@ export default function KybPage() {
 
   const kybStatus: KybStatus =
     meQuery.data?.kybStatus ?? session?.user?.kybStatus ?? "NOT_STARTED"
-
-  const kycStatus: KycStatus | undefined =
-    meQuery.data?.kycStatus ?? session?.user?.kycStatus
 
   // Access token for the Sumsub WebSDK — fetched on mount since there's
   // no questionnaire phase to gate it.
@@ -75,21 +69,6 @@ export default function KybPage() {
       }
     }, 5_000)
   }, [meQuery])
-
-  // Guard: KYC must be completed first.
-  if (kycStatus && kycStatus !== "COMPLETED") {
-    return (
-      <StatusState
-        icon={<WarningCircle size={32} className="text-amber-600" />}
-        title="KYC verification required"
-        subtitle="You must complete individual KYC verification before starting business verification (KYB)."
-        action={{
-          label: "Go to KYC",
-          onClick: () => router.push("/app/profile/kyc"),
-        }}
-      />
-    )
-  }
 
   // Already verified — show success state.
   if (kybStatus === "COMPLETED") {
@@ -165,10 +144,7 @@ export default function KybPage() {
       )}
 
       {tokenQuery.data?.token && (
-        <div
-          className="overflow-hidden rounded-lg border"
-          style={{ height: "85vh" }}
-        >
+        <div className="rounded-lg border" style={{ minHeight: "85vh" }}>
           <SumsubWebSdk
             accessToken={tokenQuery.data.token}
             expirationHandler={async () => {

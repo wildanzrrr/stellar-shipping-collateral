@@ -9,7 +9,6 @@ import {
   CircleNotch,
   IdentificationCard,
   Sparkle,
-  Wallet,
 } from "@phosphor-icons/react"
 
 import {
@@ -87,28 +86,29 @@ export default function ProfilePage() {
               value={meQuery.data?.walletAddress ?? "—"}
               mono
             />
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">KYC status</span>
-              <div className="flex items-center gap-2">
-                {kycStatus && <KycBadge status={kycStatus} />}
-                {kycStatus !== "COMPLETED" && (
-                  <Link
-                    href="/app/profile/kyc"
-                    className="text-xs font-medium text-primary hover:underline"
-                  >
-                    Verify now →
-                  </Link>
-                )}
-              </div>
-            </div>
-            {role === "SHIPPING_COMPANY" && (
+            {role === "SHIPPING_COMPANY" ? (
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">KYB status</span>
                 <div className="flex items-center gap-2">
                   {kybStatus && <KybBadge status={kybStatus} />}
-                  {kybStatus !== "COMPLETED" && kycStatus === "COMPLETED" && (
+                  {kybStatus !== "COMPLETED" && (
                     <Link
                       href="/app/profile/kyb"
+                      className="text-xs font-medium text-primary hover:underline"
+                    >
+                      Verify now →
+                    </Link>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">KYC status</span>
+                <div className="flex items-center gap-2">
+                  {kycStatus && <KycBadge status={kycStatus} />}
+                  {kycStatus !== "COMPLETED" && (
+                    <Link
+                      href="/app/profile/kyc"
                       className="text-xs font-medium text-primary hover:underline"
                     >
                       Verify now →
@@ -121,33 +121,32 @@ export default function ProfilePage() {
         </div>
 
         {/* Business info card — only for shipping companies */}
-        {role === "SHIPPING_COMPANY" &&
-          meQuery.data?.companyName && (
-            <div className="mt-6 flex flex-col gap-0">
-              <div className="flex items-center gap-2 border-b pb-3">
-                <Building size={18} className="text-muted-foreground" />
-                <h2 className="text-sm font-medium">Business</h2>
-              </div>
-              <div className="mt-3 flex flex-col gap-3 text-sm">
-                <ProfileRow
-                  label="Company name"
-                  value={meQuery.data.companyName}
-                />
-                {meQuery.data.companyRegistrationNumber && (
-                  <ProfileRow
-                    label="Registration number"
-                    value={meQuery.data.companyRegistrationNumber}
-                  />
-                )}
-                {meQuery.data.companyCountry && (
-                  <ProfileRow
-                    label="Country"
-                    value={meQuery.data.companyCountry}
-                  />
-                )}
-              </div>
+        {role === "SHIPPING_COMPANY" && meQuery.data?.companyName && (
+          <div className="mt-6 flex flex-col gap-0">
+            <div className="flex items-center gap-2 border-b pb-3">
+              <Building size={18} className="text-muted-foreground" />
+              <h2 className="text-sm font-medium">Business</h2>
             </div>
-          )}
+            <div className="mt-3 flex flex-col gap-3 text-sm">
+              <ProfileRow
+                label="Company name"
+                value={meQuery.data.companyName}
+              />
+              {meQuery.data.companyRegistrationNumber && (
+                <ProfileRow
+                  label="Registration number"
+                  value={meQuery.data.companyRegistrationNumber}
+                />
+              )}
+              {meQuery.data.companyCountry && (
+                <ProfileRow
+                  label="Country"
+                  value={meQuery.data.companyCountry}
+                />
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Investment profile card */}
         <div className="mt-6 flex flex-col gap-0">

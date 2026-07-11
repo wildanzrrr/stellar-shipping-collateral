@@ -161,3 +161,30 @@ body {
 .dark .bk-logo .bk-logo__dark {
   display: block;
 }
+
+/* ── Auth "running…" ellipsis — shows the process is still alive ── */
+.auth-status__running::after {
+  content: "";
+  display: inline-block;
+  width: 1.5em;
+  text-align: left;
+  animation: auth-running-ellipsis 1.2s steps(4, end) infinite;
+}
+
+@keyframes auth-running-ellipsis {
+  0% {
+    content: "";
+  }
+  25% {
+    content: ".";
+  }
+  50% {
+    content: "..";
+  }
+  75% {
+    content: "...";
+  }
+  100% {
+    content: "";
+  }
+}

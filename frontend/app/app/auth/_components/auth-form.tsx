@@ -126,11 +126,13 @@ export function AuthForm({
         )}
 
         <Button type="submit" disabled={busy}>
-          {busy
-            ? "Working…"
-            : mode === "login"
-              ? "Sign in with passkey"
-              : "Create account"}
+          {busy ? (
+            <span className="auth-status__running">Working</span>
+          ) : mode === "login" ? (
+            "Sign in with passkey"
+          ) : (
+            "Create account"
+          )}
         </Button>
       </form>
     </Form>

@@ -50,7 +50,7 @@ export class SumsubService {
     const appToken = this.config.getOrThrow<string>('SUMSUB_APP_TOKEN');
     const secretKey = this.config.getOrThrow<string>('SUMSUB_SECRET_KEY');
     const baseUrl = this.config.getOrThrow<string>('SUMSUB_BASE_URL');
-    const levelName = this.config.getOrThrow<string>('SUMSUB_LEVEL_NAME');
+    const levelName = this.config.getOrThrow<string>('SUMSUB_KYC_LEVEL_NAME');
 
     // Sumsub access-token endpoint. externalUserId = our user id so
     // applicantReviewed webhooks can be correlated back.
@@ -128,11 +128,11 @@ export class SumsubService {
   /**
    * Generate a Sumsub access token for KYB (business verification).
    *
-   * Only SHIPPING_COMPANY users who have completed KYC can start KYB.
-   * Uses `SUMSUB_KYB_LEVEL_NAME` (an Individuals level, same level type as
-   * KYC but with different checks configured in the Sumsub Dashboard) and
-   * sets `externalUserId = "{userId}:kyb"` so webhook events can be routed
-   * to the KYB lifecycle instead of KYC.
+   * Only SHIPPING_COMPANY users can start KYB — they skip KYC entirely and
+   * go straight to KYB. Uses `SUMSUB_KYB_LEVEL_NAME` (an Individuals level,
+   * same level type as KYC but with different checks configured in the Sumsub
+   * Dashboard, e.g. a KYB questionnaire) and sets `externalUserId =
+   * "{userId}:kyb"` so webhook events can be routed to the KYB lifecycle.
    */
   async generateKybAccessToken(userId: string): Promise<SuccessResponseDTO> {
     const user = await this.users.get({ id: userId });
@@ -145,12 +145,7 @@ export class SumsubService {
       );
     }
 
-    // Guard: KYC must be completed before starting KYB.
-    if (user.kycStatus !== KycStatus.COMPLETED) {
-      throw new BadGatewayException(
-        'KYC verification must be completed before starting KYB',
-      );
-    }
+    // Shipping companies skip KYC — they go straight to KYB.
 
     // Guard: already verified — no need to re-issue.
     if (user.kybStatus === KybStatus.COMPLETED) {

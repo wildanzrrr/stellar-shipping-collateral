@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
@@ -20,6 +20,7 @@ import {
   sumsubApi,
   type KycStatus,
   type QuestionnaireAnswers,
+  type UserRole,
 } from "@/lib/api"
 
 import {
@@ -58,6 +59,15 @@ export default function KycPage() {
   const kycStatus: KycStatus =
     meQuery.data?.kycStatus ?? session?.user?.kycStatus ?? "NOT_STARTED"
 
+  const role: UserRole | undefined = meQuery.data?.role ?? session?.user?.role
+
+  // Shipping companies skip KYC — redirect them to KYB.
+  useEffect(() => {
+    if (role === "SHIPPING_COMPANY") {
+      router.replace("/app/profile/kyb")
+    }
+  }, [role, router])
+
   // Access token for the Sumsub WebSDK — only fetched when we reach the
   // verification phase to avoid generating a token before the questionnaire
   // is complete.
@@ -94,6 +104,17 @@ export default function KycPage() {
         title="You're verified"
         subtitle="Your identity has been confirmed. You now have full access to the app."
         action={{ label: "Back to app", onClick: () => router.push("/app") }}
+      />
+    )
+  }
+
+  // Shipping company being redirected to KYB — show a brief loading state.
+  if (role === "SHIPPING_COMPANY") {
+    return (
+      <StatusState
+        icon={<SpinnerGap size={32} className="animate-spin" />}
+        title="Redirecting…"
+        subtitle="Shipping companies go straight to business verification."
       />
     )
   }
@@ -192,10 +213,7 @@ export default function KycPage() {
       )}
 
       {tokenQuery.data?.token && (
-        <div
-          className="overflow-hidden rounded-lg border"
-          style={{ height: "85vh" }}
-        >
+        <div className="rounded-lg border" style={{ minHeight: "85vh" }}>
           <SumsubWebSdk
             accessToken={tokenQuery.data.token}
             // Token expiration handler — fetches a fresh token from the BE.

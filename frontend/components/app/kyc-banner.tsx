@@ -6,7 +6,14 @@ import { useQuery } from "@tanstack/react-query"
 import { X } from "@phosphor-icons/react"
 import { useSession } from "next-auth/react"
 
-import { authApi, KYC_STATUS_LABELS, KYB_STATUS_LABELS, type KycStatus, type KybStatus, type UserRole } from "@/lib/api"
+import {
+  authApi,
+  KYC_STATUS_LABELS,
+  KYB_STATUS_LABELS,
+  type KycStatus,
+  type KybStatus,
+  type UserRole,
+} from "@/lib/api"
 
 /**
  * Non-intrusive banner shown below the navbar when the signed-in user has not
@@ -32,12 +39,10 @@ export function KycBanner() {
   const kybStatus: KybStatus =
     meQuery.data?.kybStatus ?? session?.user?.kybStatus ?? "NOT_STARTED"
 
-  const role: UserRole | undefined =
-    meQuery.data?.role ?? session?.user?.role
+  const role: UserRole | undefined = meQuery.data?.role ?? session?.user?.role
 
-  // KYB is only relevant for shipping companies whose KYC is already done.
-  const showKybBanner =
-    role === "SHIPPING_COMPANY" && kycStatus === "COMPLETED" && kybStatus !== "COMPLETED"
+  // KYB is the only verification for shipping companies (they skip KYC).
+  const showKybBanner = role === "SHIPPING_COMPANY" && kybStatus !== "COMPLETED"
 
   const storageKey = `kyc-banner-dismissed:${session?.user?.id ?? "anon"}`
   const kybStorageKey = `kyb-banner-dismissed:${session?.user?.id ?? "anon"}`
@@ -45,7 +50,11 @@ export function KycBanner() {
   const [dismissed, setDismissed] = useState(() => {
     if (kycStatus === "COMPLETED") return false
     try {
-      return window.localStorage.getItem(`kyc-banner-dismissed:${session?.user?.id ?? "anon"}`) === "1"
+      return (
+        window.localStorage.getItem(
+          `kyc-banner-dismissed:${session?.user?.id ?? "anon"}`
+        ) === "1"
+      )
     } catch {
       return false
     }
@@ -53,7 +62,11 @@ export function KycBanner() {
   const [kybDismissed, setKybDismissed] = useState(() => {
     if (kybStatus === "COMPLETED" || !showKybBanner) return false
     try {
-      return window.localStorage.getItem(`kyb-banner-dismissed:${session?.user?.id ?? "anon"}`) === "1"
+      return (
+        window.localStorage.getItem(
+          `kyb-banner-dismissed:${session?.user?.id ?? "anon"}`
+        ) === "1"
+      )
     } catch {
       return false
     }
@@ -79,14 +92,12 @@ export function KycBanner() {
     }
   }, [kycStatus, kybStatus, showKybBanner, storageKey, kybStorageKey])
 
-  // KYC banner — only show when KYC is not completed and not dismissed.
-  // When KYC is done but KYB is pending, show the KYB banner instead.
-  if (kycStatus === "COMPLETED" && (!showKybBanner || kybDismissed)) return null
+  // KYC done + no KYB needed (or KYB dismissed) → hide everything.
+  if (!showKybBanner && kycStatus === "COMPLETED") return null
 
-  // If KYC is done but KYB is needed, render the KYB banner.
-  if (kycStatus === "COMPLETED" && showKybBanner) {
-    const isBlocking =
-      kybStatus === "NOT_STARTED" || kybStatus === "INIT"
+  // If KYB is needed (shipping company), render the KYB banner.
+  if (showKybBanner && !kybDismissed) {
+    const isBlocking = kybStatus === "NOT_STARTED" || kybStatus === "INIT"
     const isNegative = kybStatus === "REJECTED" || kybStatus === "ON_HOLD"
 
     return (
@@ -169,6 +180,8 @@ export function KycBanner() {
 
   // --- KYC banner (original) ---
 
+  // Shipping companies go straight to KYB — never show the KYC banner.
+  if (role === "SHIPPING_COMPANY") return null
   if (dismissed) return null
   const isBlocking = kycStatus === "NOT_STARTED" || kycStatus === "INIT"
   const isNegative = kycStatus === "REJECTED" || kycStatus === "ON_HOLD"

@@ -13,7 +13,7 @@ Sumsub is a KYC/AML verification provider. Two key concepts:
 | **Applicant**          | A person being verified. Each applicant has a `userId` (our internal user ID, passed as `externalUserId`) and a `levelName` that defines the verification flow.    |
 | **Access Token**       | A short-lived, single-applicant token the backend generates via `POST /resources/accessTokens/sdk`. The frontend WebSDK uses it to launch the verification widget. |
 | **Webhook**            | A server-to-server callback Sumsub sends when an applicant's status changes (created, pending, reviewed, rejected, on hold). Signed with HMAC-SHA256.              |
-| **Verification Level** | A named configuration in the Sumsub Dashboard that defines which checks to run (ID document, liveness, AML, etc.). Referenced by `SUMSUB_LEVEL_NAME`.              |
+| **Verification Level** | A named configuration in the Sumsub Dashboard that defines which checks to run (ID document, liveness, AML, etc.). Referenced by `SUMSUB_KYC_LEVEL_NAME`.          |
 
 ---
 
@@ -29,7 +29,7 @@ Sumsub is a KYC/AML verification provider. Two key concepts:
 3. **Create a verification level**:
    - Dashboard → Verification Levels → Create
    - Name it (e.g. `basic-kyc`) and configure the required steps (ID document, liveness, etc.)
-   - The level **slug** (not display name) goes into `SUMSUB_LEVEL_NAME`
+   - The level **slug** (not display name) goes into `SUMSUB_KYC_LEVEL_NAME`
 4. **Set up the webhook**:
    - Dashboard → Webhooks → Add webhook
    - **Endpoint URL**: `https://<your-backend-host>/api/v1/sumsub/webhook` (must be HTTPS, publicly reachable)
@@ -47,7 +47,7 @@ SUMSUB_APP_TOKEN=""
 SUMSUB_SECRET_KEY=""
 SUMSUB_WEBHOOK_SECRET=""
 SUMSUB_BASE_URL="https://api.sumsub.com"
-SUMSUB_LEVEL_NAME="basic-kyc"
+SUMSUB_KYC_LEVEL_NAME="basic-kyc"
 ```
 
 | Variable                | Where to find it                                                                      |
@@ -56,7 +56,7 @@ SUMSUB_LEVEL_NAME="basic-kyc"
 | `SUMSUB_SECRET_KEY`     | Dashboard → Settings → API → Secret Key                                               |
 | `SUMSUB_WEBHOOK_SECRET` | Dashboard → Webhooks → your webhook → secret                                          |
 | `SUMSUB_BASE_URL`       | `https://api.sumsub.com` (same for Sandbox and Production — switch mode in Dashboard) |
-| `SUMSUB_LEVEL_NAME`     | Dashboard → Verification Levels → KYC level slug                                      |
+| `SUMSUB_KYC_LEVEL_NAME` | Dashboard → Verification Levels → KYC level slug                                      |
 | `SUMSUB_KYB_LEVEL_NAME` | Dashboard → Verification Levels → KYB level slug (e.g. `registry-aml-check`)          |
 
 ### 2.3 Webhook URL requirements
@@ -142,7 +142,7 @@ The service:
 
 1. Sends `POST /resources/accessTokens/sdk` to Sumsub with a JSON body (`userId`, `levelName`, `ttlInSecs`, `applicantIdentifiers: { email }`) and the HMAC-SHA256 signature header.
 2. Sets `userId` (Sumsub external user ID) to the authenticated user's ID.
-3. Sets `levelName` from `SUMSUB_LEVEL_NAME`.
+3. Sets `levelName` from `SUMSUB_KYC_LEVEL_NAME`.
 4. Passes `applicantIdentifiers: { email: user.email }` so the WebSDK pre-fills the applicant's email and skips the "enter email" step.
 5. If the user's `kycStatus` was `NOT_STARTED`, upgrades it to `INIT`.
 

@@ -25,7 +25,7 @@ async function bootstrap() {
     'SUMSUB_SECRET_KEY',
     'SUMSUB_WEBHOOK_SECRET',
     'SUMSUB_BASE_URL',
-    'SUMSUB_LEVEL_NAME',
+    'SUMSUB_KYC_LEVEL_NAME',
     // Sumsub KYB (business verification for SHIPPING_COMPANY users)
     'SUMSUB_KYB_LEVEL_NAME',
   ];

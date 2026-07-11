@@ -50,8 +50,10 @@ export function AuthPanel() {
         <AuthForm mode={mode} busy={busy} onSubmit={handleSubmit} />
 
         {status && (
-          <div className="text-center text-xs text-muted-foreground">
-            → {status}
+          <div className="flex flex-col items-center gap-2 text-center">
+            <div className="auth-status__running text-xs text-muted-foreground">
+              {status}
+            </div>
           </div>
         )}
       </div>
