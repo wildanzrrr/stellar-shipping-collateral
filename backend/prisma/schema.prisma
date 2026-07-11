@@ -53,6 +53,7 @@ model User {
   wallet            Wallet?
   signSession       SignSession[]
   investmentProfile InvestmentProfile?
+  businessProfile   BusinessProfile?
 
   // --- KYC (Sumsub) ---
   // New users are NOT verified regardless of role. This is only set to
@@ -63,17 +64,18 @@ model User {
   sumsubExternalUserId String? // mirrors our user id for Sumsub lookups
 
   // --- KYB (Sumsub business verification) ---
-  // Only SHIPPING_COMPANY users go through KYB. KYC must be COMPLETED first.
-  // KybStatus tracks the business verification lifecycle independently from
-  // KYC. Both must be COMPLETED for the shipping company to tokenize RWAs.
-  kybStatus              KybStatus @default(NOT_STARTED)
-  sumsubKybApplicantId   String?   @unique
+  // Only SHIPPING_COMPANY users go through KYB. Shipping companies skip KYC
+  // and go straight to KYB. KybStatus tracks the business verification
+  // lifecycle independently from KYC. Must be COMPLETED for the shipping
+  // company to tokenize RWAs.
+  kybStatus               KybStatus @default(NOT_STARTED)
+  sumsubKybApplicantId    String?   @unique
   sumsubKybExternalUserId String? // "{userId}:kyb" for webhook routing
 
   // Business profile data — populated from Sumsub KYB webhook when approved.
-  companyName             String?
+  companyName               String?
   companyRegistrationNumber String?
-  companyCountry          String?
+  companyCountry            String?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -130,6 +132,19 @@ model SignSession {
 // Each user has at most one profile (1:1). Answers are stored as JSON
 // because the questionnaire structure is flexible (single + multi-select).
 model InvestmentProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  answers   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// Business profile answers collected before KYB verification (shipping
+// companies only). Same flexible JSON storage as InvestmentProfile.
+model BusinessProfile {
   id        String   @id @default(cuid())
   userId    String   @unique
   user      User     @relation(fields: [userId], references: [id])

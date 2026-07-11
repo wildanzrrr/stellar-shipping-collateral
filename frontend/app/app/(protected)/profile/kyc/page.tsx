@@ -103,7 +103,10 @@ export default function KycPage() {
         icon={<CheckCircle size={32} className="text-emerald-600" />}
         title="You're verified"
         subtitle="Your identity has been confirmed. You now have full access to the app."
-        action={{ label: "Back to app", onClick: () => router.push("/app") }}
+        action={{
+          label: "Back to profile",
+          onClick: () => router.push("/app/profile"),
+        }}
       />
     )
   }

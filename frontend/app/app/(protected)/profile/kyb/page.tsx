@@ -19,23 +19,38 @@ import {
   KYB_STATUS_LABELS,
   sumsubApi,
   type KybStatus,
+  type QuestionnaireAnswers,
 } from "@/lib/api"
 
+import {
+  InvestmentQuestionnaire,
+  QuestionnaireComplete,
+} from "../kyc/_components/investment-questionnaire"
+import { BUSINESS_QUESTIONS } from "./_components/questionnaire-data"
+
+type Phase = "questionnaire" | "transition" | "verification"
+
 /**
- * KYB (business verification) page — Sumsub WebSDK.
+ * KYB (business verification) page.
  *
- * Shipping companies skip KYC and go straight to KYB. Uses an Individuals
- * level (`kyb_registry`) with KYB-specific checks (e.g. questionnaire)
- * configured in the Sumsub Dashboard. The webhook updates `kybStatus`.
+ * Two-phase flow (mirrors the KYC page):
+ * 1. Business profile questionnaire — questions about the shipping company's
+ *    operations (fleet, routes, revenue, use of funds).
+ * 2. Sumsub WebSDK — business verification via the `kyb_registry` Individuals
+ *    level. The webhook updates `kybStatus`.
+ *
+ * Shipping companies skip KYC entirely and go straight to this page.
  */
 export default function KybPage() {
   const router = useRouter()
   const { data: session } = useSession()
   const accessToken = session?.accessToken ?? ""
 
+  const [phase, setPhase] = useState<Phase>("questionnaire")
+  const [submitting, setSubmitting] = useState(false)
   const [polling, setPolling] = useState(false)
 
-  // Current KYB + KYC status from the BE.
+  // Current KYB status from the BE.
   const meQuery = useQuery({
     queryKey: ["me"],
     queryFn: () => authApi.me(accessToken),
@@ -45,12 +60,13 @@ export default function KybPage() {
   const kybStatus: KybStatus =
     meQuery.data?.kybStatus ?? session?.user?.kybStatus ?? "NOT_STARTED"
 
-  // Access token for the Sumsub WebSDK — fetched on mount since there's
-  // no questionnaire phase to gate it.
+  // Access token for the Sumsub WebSDK — only fetched when we reach the
+  // verification phase to avoid generating a token before the questionnaire
+  // is complete.
   const tokenQuery = useQuery({
     queryKey: ["sumsub-kyb-token"],
     queryFn: () => sumsubApi.getKybAccessToken(accessToken),
-    enabled: Boolean(accessToken),
+    enabled: Boolean(accessToken) && phase === "verification",
     staleTime: 10 * 60 * 1000,
     retry: false,
   })
@@ -77,10 +93,52 @@ export default function KybPage() {
         icon={<CheckCircle size={32} className="text-emerald-600" />}
         title="Business verified"
         subtitle="Your company has been verified. You can now tokenize assets on the platform."
-        action={{ label: "Back to app", onClick: () => router.push("/app") }}
+        action={{
+          label: "Back to profile",
+          onClick: () => router.push("/app/profile"),
+        }}
       />
     )
   }
+
+  // Phase 1 — business profile questionnaire.
+  if (phase === "questionnaire") {
+    return (
+      <InvestmentQuestionnaire
+        questions={BUSINESS_QUESTIONS}
+        ctaLabel="Continue to KYB"
+        isSubmitting={submitting}
+        onComplete={async (answers: QuestionnaireAnswers) => {
+          setSubmitting(true)
+          try {
+            await authApi.submitBusinessQuestionnaire(accessToken, answers)
+            await meQuery.refetch()
+          } catch {
+            toast.error(
+              "Failed to save your business profile. Please try again."
+            )
+            setSubmitting(false)
+            return
+          }
+          // Brief transition so the user sees their profile was saved.
+          setPhase("transition")
+          setTimeout(() => {
+            setSubmitting(false)
+            setPhase("verification")
+          }, 1500)
+        }}
+      />
+    )
+  }
+
+  // Transition — brief "profile saved" state before Sumsub launches.
+  if (phase === "transition") {
+    return (
+      <QuestionnaireComplete message="Your business profile has been recorded. Starting business verification…" />
+    )
+  }
+
+  // Phase 2 — Sumsub WebSDK verification.
 
   // Loading token.
   if (tokenQuery.isLoading) {

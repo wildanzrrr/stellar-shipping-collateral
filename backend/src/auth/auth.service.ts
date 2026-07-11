@@ -23,7 +23,10 @@ import {
   LoginInitDTO,
   LoginCompleteDTO,
 } from './auth.dto';
-import { SubmitQuestionnaireDTO } from './auth.dto';
+import {
+  SubmitQuestionnaireDTO,
+  SubmitBusinessQuestionnaireDTO,
+} from './auth.dto';
 import { AuthTokens, RefreshTokenPayload } from './jwt.types';
 
 // Minimal shapes for the DFNS responses we consume (keeps this file free of `any`).
@@ -282,6 +285,28 @@ export class AuthService {
     };
   }
 
+  async submitBusinessQuestionnaire(
+    userId: string,
+    payload: SubmitBusinessQuestionnaireDTO,
+  ): Promise<SuccessResponseDTO> {
+    this.logger.debug('Submit business questionnaire', { userId });
+
+    const user = await this.usersRepository.get({ id: userId });
+    if (!user) throw new NotFoundException('User not found');
+
+    const profile = await this.usersRepository.upsertBusinessProfile(
+      userId,
+      payload.answers,
+    );
+
+    return {
+      success: true,
+      message: 'Business profile saved',
+      data: { answers: profile.answers },
+      statusCode: HttpStatus.OK,
+    };
+  }
+
   async logout(userId: string): Promise<SuccessResponseDTO> {
     await this.usersRepository.update(userId, { refreshTokenHash: null });
     return {
@@ -381,6 +406,9 @@ export class AuthService {
       companyCountry: user.companyCountry ?? null,
       investmentProfile: user.investmentProfile
         ? (user.investmentProfile.answers as Record<string, string | string[]>)
+        : null,
+      businessProfile: user.businessProfile
+        ? (user.businessProfile.answers as Record<string, string | string[]>)
         : null,
     };
   }

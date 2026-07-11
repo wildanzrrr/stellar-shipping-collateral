@@ -1,6 +1,6 @@
 "use client"
 
-import { useForm } from "react-hook-form"
+import { useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 
 import { Button } from "@/components/ui/button"
@@ -37,6 +37,10 @@ export function AuthForm({
     },
   })
 
+  const watchedRole = useWatch({ control: form.control, name: "role" })
+  const emailPlaceholder =
+    watchedRole === "SHIPPING_COMPANY" ? "you@company.com" : "your@email.co"
+
   function handleSubmit(values: RegisterValues) {
     onSubmit({
       email: values.email,
@@ -52,6 +56,18 @@ export function AuthForm({
         className="flex flex-col gap-3"
         onSubmit={form.handleSubmit(handleSubmit)}
       >
+        {mode === "register" && (
+          <FormField
+            control={form.control}
+            name="role"
+            render={({ field }) => (
+              <FormItem>
+                <RoleSelect value={field.value} onChange={field.onChange} />
+              </FormItem>
+            )}
+          />
+        )}
+
         <FormField
           control={form.control}
           name="email"
@@ -63,7 +79,7 @@ export function AuthForm({
                   id="email"
                   type="email"
                   autoComplete="email"
-                  placeholder="you@company.com"
+                  placeholder={emailPlaceholder}
                   autoFocus
                   {...field}
                 />
@@ -74,55 +90,43 @@ export function AuthForm({
         />
 
         {mode === "register" && (
-          <>
+          <div className="flex gap-2">
             <FormField
               control={form.control}
-              name="role"
+              name="firstName"
               render={({ field }) => (
-                <FormItem>
-                  <RoleSelect value={field.value} onChange={field.onChange} />
+                <FormItem className="flex-1">
+                  <FormLabel htmlFor="firstName">First name</FormLabel>
+                  <FormControl>
+                    <Input
+                      id="firstName"
+                      autoComplete="given-name"
+                      placeholder="Alice"
+                      {...field}
+                    />
+                  </FormControl>
                 </FormItem>
               )}
             />
 
-            <div className="flex gap-2">
-              <FormField
-                control={form.control}
-                name="firstName"
-                render={({ field }) => (
-                  <FormItem className="flex-1">
-                    <FormLabel htmlFor="firstName">First name</FormLabel>
-                    <FormControl>
-                      <Input
-                        id="firstName"
-                        autoComplete="given-name"
-                        placeholder="Alice"
-                        {...field}
-                      />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="lastName"
-                render={({ field }) => (
-                  <FormItem className="flex-1">
-                    <FormLabel htmlFor="lastName">Last name</FormLabel>
-                    <FormControl>
-                      <Input
-                        id="lastName"
-                        autoComplete="family-name"
-                        placeholder="Doe"
-                        {...field}
-                      />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-            </div>
-          </>
+            <FormField
+              control={form.control}
+              name="lastName"
+              render={({ field }) => (
+                <FormItem className="flex-1">
+                  <FormLabel htmlFor="lastName">Last name</FormLabel>
+                  <FormControl>
+                    <Input
+                      id="lastName"
+                      autoComplete="family-name"
+                      placeholder="Doe"
+                      {...field}
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+          </div>
         )}
 
         <Button type="submit" disabled={busy}>

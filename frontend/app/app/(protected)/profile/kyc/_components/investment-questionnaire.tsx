@@ -15,11 +15,16 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { QuestionnaireAnswers } from "@/lib/api"
 
-import { QUESTIONS, type Question } from "./questionnaire-data"
+import {
+  QUESTIONS as QUESTIONS_DEFAULT,
+  type Question,
+} from "./questionnaire-data"
 
 interface InvestmentQuestionnaireProps {
   onComplete: (answers: QuestionnaireAnswers) => void
   isSubmitting?: boolean
+  questions?: Question[]
+  ctaLabel?: string
 }
 
 /**
@@ -32,13 +37,15 @@ interface InvestmentQuestionnaireProps {
 export function InvestmentQuestionnaire({
   onComplete,
   isSubmitting = false,
+  questions = QUESTIONS_DEFAULT,
+  ctaLabel = "Continue to KYC",
 }: InvestmentQuestionnaireProps) {
   const router = useRouter()
   const [step, setStep] = useState(0)
   const [answers, setAnswers] = useState<QuestionnaireAnswers>({})
 
-  const question = QUESTIONS[step]
-  const isLast = step === QUESTIONS.length - 1
+  const question = questions[step]
+  const isLast = step === questions.length - 1
   const isFirst = step === 0
 
   const selected = answers[question.id]
@@ -102,7 +109,7 @@ export function InvestmentQuestionnaire({
 
         {/* Progress */}
         <div className="mb-8 flex items-center gap-1.5">
-          {QUESTIONS.map((_, i) => (
+          {questions.map((_, i) => (
             <div
               key={i}
               className={cn(
@@ -113,7 +120,7 @@ export function InvestmentQuestionnaire({
           ))}
         </div>
         <p className="mb-6 text-xs font-medium text-muted-foreground">
-          Step {step + 1} of {QUESTIONS.length}
+          Step {step + 1} of {questions.length}
         </p>
 
         {/* Question */}
@@ -186,7 +193,7 @@ export function InvestmentQuestionnaire({
               </>
             ) : isLast ? (
               <>
-                Continue to KYC
+                {ctaLabel}
                 <ArrowRight size={16} />
               </>
             ) : (
@@ -206,7 +213,11 @@ export function InvestmentQuestionnaire({
  * Completion state shown briefly after the questionnaire is submitted,
  * before transitioning to the Sumsub WebSDK.
  */
-export function QuestionnaireComplete() {
+export function QuestionnaireComplete({
+  message = "Your investment profile has been recorded. Starting identity verification…",
+}: {
+  message?: string
+}) {
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 py-6 text-center">
       <div className="flex size-12 items-center justify-center rounded-full bg-emerald-50">
@@ -214,10 +225,7 @@ export function QuestionnaireComplete() {
       </div>
       <div className="flex flex-col gap-1">
         <h1 className="text-lg font-medium">Profile saved</h1>
-        <p className="max-w-sm text-sm text-muted-foreground">
-          Your investment profile has been recorded. Starting identity
-          verification…
-        </p>
+        <p className="max-w-sm text-sm text-muted-foreground">{message}</p>
       </div>
     </div>
   )

@@ -88,6 +88,7 @@ export interface PublicUser {
   companyRegistrationNumber?: string | null
   companyCountry?: string | null
   investmentProfile?: QuestionnaireAnswers | null
+  businessProfile?: QuestionnaireAnswers | null
 }
 
 export interface AuthResult {
@@ -168,6 +169,15 @@ export const authApi = {
     req<PublicUser>("/auth/me", { headers: bearer(accessToken) }),
   submitQuestionnaire: (accessToken: string, answers: QuestionnaireAnswers) =>
     req<{ answers: QuestionnaireAnswers }>("/auth/questionnaire", {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify({ answers }),
+    }),
+  submitBusinessQuestionnaire: (
+    accessToken: string,
+    answers: QuestionnaireAnswers
+  ) =>
+    req<{ answers: QuestionnaireAnswers }>("/auth/business-questionnaire", {
       method: "POST",
       headers: bearer(accessToken),
       body: JSON.stringify({ answers }),

@@ -22,11 +22,16 @@ import {
   type UserRole,
 } from "@/lib/api"
 
-import { QUESTIONS } from "./kyc/_components/questionnaire-data"
+import { QUESTIONS, type Question } from "./kyc/_components/questionnaire-data"
+import { BUSINESS_QUESTIONS } from "./kyb/_components/questionnaire-data"
 
 /** Map raw answer values to human-readable labels from the questionnaire. */
-function answerLabels(questionId: string, raw: string | string[]): string[] {
-  const question = QUESTIONS.find((q) => q.id === questionId)
+function answerLabels(
+  questionId: string,
+  raw: string | string[],
+  questions: Question[]
+): string[] {
+  const question = questions.find((q) => q.id === questionId)
   if (!question) return Array.isArray(raw) ? raw : [raw]
   const values = Array.isArray(raw) ? raw : [raw]
   return values.map(
@@ -51,6 +56,8 @@ export default function ProfilePage() {
     meQuery.data?.kybStatus ?? session?.user?.kybStatus
   const profile: QuestionnaireAnswers | null | undefined =
     meQuery.data?.investmentProfile ?? null
+  const businessProfile: QuestionnaireAnswers | null | undefined =
+    meQuery.data?.businessProfile ?? null
 
   const fullName =
     [session?.user?.firstName, session?.user?.lastName]
@@ -148,68 +155,135 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* Investment profile card */}
-        <div className="mt-6 flex flex-col gap-0">
-          <div className="flex items-center gap-2 border-b pb-3">
-            <Sparkle size={18} className="text-muted-foreground" />
-            <h2 className="text-sm font-medium">Investment Profile</h2>
-          </div>
+        {/* Investment profile card — investors only */}
+        {role !== "SHIPPING_COMPANY" && (
+          <div className="mt-6 flex flex-col gap-0">
+            <div className="flex items-center gap-2 border-b pb-3">
+              <Sparkle size={18} className="text-muted-foreground" />
+              <h2 className="text-sm font-medium">Investment Profile</h2>
+            </div>
 
-          {meQuery.isLoading ? (
-            <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
-              <CircleNotch size={14} className="animate-spin" />
-              Loading…
-            </div>
-          ) : profile && Object.keys(profile).length > 0 ? (
-            <div className="mt-3 flex flex-col gap-3">
-              {QUESTIONS.map((q) => {
-                const raw = profile[q.id]
-                if (!raw) return null
-                const labels = answerLabels(q.id, raw)
-                return (
-                  <div
-                    key={q.id}
-                    className="flex flex-col gap-1.5 rounded-lg border p-3"
-                  >
-                    <span className="text-xs text-muted-foreground">
-                      {q.title}
-                    </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {labels.map((label) => (
-                        <span
-                          key={label}
-                          className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium"
-                        >
-                          {label}
-                        </span>
-                      ))}
+            {meQuery.isLoading ? (
+              <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+                <CircleNotch size={14} className="animate-spin" />
+                Loading…
+              </div>
+            ) : profile && Object.keys(profile).length > 0 ? (
+              <div className="mt-3 flex flex-col gap-3">
+                {QUESTIONS.map((q) => {
+                  const raw = profile[q.id]
+                  if (!raw) return null
+                  const labels = answerLabels(q.id, raw, QUESTIONS)
+                  return (
+                    <div
+                      key={q.id}
+                      className="flex flex-col gap-1.5 rounded-lg border p-3"
+                    >
+                      <span className="text-xs text-muted-foreground">
+                        {q.title}
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {labels.map((label) => (
+                          <span
+                            key={label}
+                            className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium"
+                          >
+                            {label}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )
-              })}
-              <Link
-                href="/app/profile/kyc"
-                className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-              >
-                Retake questionnaire
-                <ArrowRight size={12} />
-              </Link>
+                  )
+                })}
+                <Link
+                  href="/app/profile/kyc"
+                  className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                >
+                  Retake questionnaire
+                  <ArrowRight size={12} />
+                </Link>
+              </div>
+            ) : (
+              <div className="mt-3 flex flex-col gap-2">
+                <p className="text-sm text-muted-foreground">
+                  Complete the investment questionnaire before KYC verification
+                  to help us build your investor profile.
+                </p>
+                <Link
+                  href="/app/profile/kyc"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                >
+                  Start questionnaire →
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Business profile card — shipping companies only */}
+        {role === "SHIPPING_COMPANY" && (
+          <div className="mt-6 flex flex-col gap-0">
+            <div className="flex items-center gap-2 border-b pb-3">
+              <Building size={18} className="text-muted-foreground" />
+              <h2 className="text-sm font-medium">Business Profile</h2>
             </div>
-          ) : (
-            <div className="mt-3 flex flex-col gap-2">
-              <p className="text-sm text-muted-foreground">
-                Complete the investment questionnaire before KYC verification to
-                help us build your investor profile.
-              </p>
-              <Link
-                href="/app/profile/kyc"
-                className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-              >
-                Start questionnaire →
-              </Link>
-            </div>
-          )}
-        </div>
+
+            {meQuery.isLoading ? (
+              <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+                <CircleNotch size={14} className="animate-spin" />
+                Loading…
+              </div>
+            ) : businessProfile && Object.keys(businessProfile).length > 0 ? (
+              <div className="mt-3 flex flex-col gap-3">
+                {BUSINESS_QUESTIONS.map((q) => {
+                  const raw = businessProfile[q.id]
+                  if (!raw) return null
+                  const labels = answerLabels(q.id, raw, BUSINESS_QUESTIONS)
+                  return (
+                    <div
+                      key={q.id}
+                      className="flex flex-col gap-1.5 rounded-lg border p-3"
+                    >
+                      <span className="text-xs text-muted-foreground">
+                        {q.title}
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {labels.map((label) => (
+                          <span
+                            key={label}
+                            className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium"
+                          >
+                            {label}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+                <Link
+                  href="/app/profile/kyb"
+                  className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                >
+                  Retake questionnaire
+                  <ArrowRight size={12} />
+                </Link>
+              </div>
+            ) : (
+              <div className="mt-3 flex flex-col gap-2">
+                <p className="text-sm text-muted-foreground">
+                  Complete the business questionnaire before KYB verification to
+                  help us understand your shipping operations.
+                </p>
+                <Link
+                  href="/app/profile/kyb"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                >
+                  Start questionnaire →
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

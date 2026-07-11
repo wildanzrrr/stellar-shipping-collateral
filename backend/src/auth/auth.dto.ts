@@ -100,3 +100,18 @@ export class SubmitQuestionnaireDTO {
   @IsNotEmpty()
   answers: Record<string, string | string[]>;
 }
+
+export class SubmitBusinessQuestionnaireDTO {
+  @ApiProperty({
+    description:
+      'Business questionnaire answers keyed by question id. Values are string (single-select) or string[] (multi-select).',
+    example: {
+      business_type: 'freight_forwarder',
+      fleet_size: '1_10',
+      trade_routes: ['asia_europe', 'trans_pacific'],
+    },
+  })
+  @IsObject()
+  @IsNotEmpty()
+  answers: Record<string, string | string[]>;
+}
