@@ -8,6 +8,11 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { WalletsModule } from './wallets/wallets.module';
 import { SumsubModule } from './sumsub/sumsub.module';
+import { BlockchainModule } from './blockchain/blockchain.module';
+import { StorageModule } from './storage/storage.module';
+import { CollateralModule } from './collateral/collateral.module';
+import { RwaModule } from './rwa/rwa.module';
+import { EventsModule } from './events/events.module';
 
 @Module({
   imports: [
@@ -16,10 +21,15 @@ import { SumsubModule } from './sumsub/sumsub.module';
     }),
     PrismaModule,
     DfnsModule,
+    StorageModule,
+    BlockchainModule,
     AuthModule,
     UsersModule,
     WalletsModule,
     SumsubModule,
+    CollateralModule,
+    RwaModule,
+    EventsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

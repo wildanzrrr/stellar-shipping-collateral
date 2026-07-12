@@ -49,6 +49,7 @@ lerna-debug.log*
 # DFNS service account keys
 /config/service-account.pem
 /config/service-account.public.pem
+/config/gcs-key.json
 
 # Runtime data
 pids

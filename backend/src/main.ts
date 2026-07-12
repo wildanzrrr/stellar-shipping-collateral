@@ -30,6 +30,10 @@ async function bootstrap() {
     'SUMSUB_KYB_LEVEL_NAME',
     // Stellar admin wallet (signs on-chain set_identity transactions)
     'ADMIN_SECRET',
+    // Google Cloud Storage (collateral document storage)
+    'GCS_PROJECT_ID',
+    'GCS_KEY_FILE',
+    'GCS_BUCKET',
   ];
 
   const missingEnvVars = requiredEnvVars.filter(

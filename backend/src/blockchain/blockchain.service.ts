@@ -1,14 +1,134 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Keypair, Networks } from '@stellar/stellar-sdk';
-import { contract as stellarContract } from '@stellar/stellar-sdk';
+import {
+  Keypair,
+  Networks,
+  rpc as stellarRpc,
+  contract as stellarContract,
+  TransactionBuilder,
+  Transaction,
+} from '@stellar/stellar-sdk';
 import {
   Client as IdentityVerifierClient,
   networks as identityVerifierNetworks,
   IdentityRole,
-} from '../packages/identity_verifier/dist/index.js';
+} from 'src/packages/identity_verifier/dist/index.js';
+import {
+  Client as FactoryClient,
+  networks as factoryNetworks,
+  RWA,
+  RWAStatus,
+} from 'src/packages/factory/dist/index.js';
 import { KycStatus, KybStatus, UserRole } from 'prisma/generated/prisma/client';
 import type { UserWithRelations } from 'src/users/users.repository';
+import { createHash, randomBytes } from 'node:crypto';
+import { xdr, StrKey } from '@stellar/stellar-sdk';
+
+/** Soroban RPC endpoint for Stellar Testnet. */
+const SOROBAN_RPC_URL =
+  process.env.SOROBAN_RPC_URL ?? 'https://soroban-testnet.stellar.org';
+
+/** Network passphrase — must match the contract deployment network. */
+const NETWORK_PASSPHRASE = Networks.TESTNET;
+
+// ─── Constants (mirrors scripts/src/lib.ts) ──────────────────────────────
+
+export const LEDGERS_PER_DAY = 17_280;
+export const LEDGERS_PER_HOUR = 720;
+export const USDC_SCALE = 10_000_000n;
+
+// ─── Permit message helpers (from scripts/src/lib.ts) ────────────────────
+
+export function buildPermitMessage(opts: {
+  contractAddress: string;
+  action: 1 | 2;
+  accountAddress: string;
+  amount: bigint;
+  nonce: bigint;
+  deadline: number;
+}): Uint8Array {
+  const { contractAddress, action, accountAddress, amount, nonce, deadline } =
+    opts;
+
+  const parts: Uint8Array[] = [];
+  parts.push(new TextEncoder().encode('SEP57_PERMIT_V1'));
+  parts.push(new Uint8Array([action]));
+  parts.push(encodeLenPrefixedStr(contractAddress));
+  parts.push(encodeLenPrefixedStr(accountAddress));
+  parts.push(bigIntToBEBytes(amount, 16));
+  parts.push(bigIntToBEBytes(nonce, 8));
+  parts.push(uint32ToBEBytes(deadline));
+  return concat(parts);
+}
+
+function encodeLenPrefixedStr(s: string): Uint8Array {
+  const bytes = new TextEncoder().encode(s);
+  const out = new Uint8Array(4 + bytes.length);
+  new DataView(out.buffer).setUint32(0, bytes.length, false);
+  out.set(bytes, 4);
+  return out;
+}
+
+function bigIntToBEBytes(n: bigint, byteLen: number): Uint8Array {
+  const out = new Uint8Array(byteLen);
+  let v = n;
+  for (let i = byteLen - 1; i >= 0; i--) {
+    out[i] = Number(v & 0xffn);
+    v >>= 8n;
+  }
+  return out;
+}
+
+function uint32ToBEBytes(n: number): Uint8Array {
+  const out = new Uint8Array(4);
+  new DataView(out.buffer).setUint32(0, n >>> 0, false);
+  return out;
+}
+
+function concat(arrs: Uint8Array[]): Uint8Array {
+  const total = arrs.reduce((s, a) => s + a.length, 0);
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const a of arrs) {
+    out.set(a, off);
+    off += a.length;
+  }
+  return out;
+}
+
+export function nextNonce(): bigint {
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  let n = 0n;
+  for (const b of bytes) n = (n << 8n) | BigInt(b);
+  return n & 0xffffffffffffffffn;
+}
+
+export function predictTokenAddress(
+  factoryAddress: string,
+  salt: Uint8Array,
+): string {
+  if (salt.length !== 32)
+    throw new Error(`salt must be 32 bytes, got ${salt.length}`);
+  const deployerRaw = StrKey.decodeContract(factoryAddress);
+  const networkId = createHash('sha256')
+    .update(Buffer.from(NETWORK_PASSPHRASE))
+    .digest();
+  const fromAddress = new xdr.ContractIdPreimageFromAddress({
+    address: xdr.ScAddress.scAddressTypeContract(
+      deployerRaw as unknown as xdr.Hash,
+    ),
+    salt: Buffer.from(salt),
+  });
+  const contractIdPreimage =
+    xdr.ContractIdPreimage.contractIdPreimageFromAddress(fromAddress);
+  const preimageCid = new xdr.HashIdPreimageContractId({
+    networkId,
+    contractIdPreimage,
+  });
+  const preimage = xdr.HashIdPreimage.envelopeTypeContractId(preimageCid);
+  const id = createHash('sha256').update(preimage.toXDR()).digest();
+  return StrKey.encodeContract(id);
+}
 
 /**
  * BlockchainService — Soroban smart-contract bridge.
@@ -29,13 +149,6 @@ import type { UserWithRelations } from 'src/users/users.repository';
  * passphrase are baked into the bindings' `networks` constant.
  */
 
-/** Soroban RPC endpoint for Stellar Testnet. */
-const SOROBAN_RPC_URL =
-  process.env.SOROBAN_RPC_URL ?? 'https://soroban-testnet.stellar.org';
-
-/** Network passphrase — must match the contract deployment network. */
-const NETWORK_PASSPHRASE = Networks.TESTNET;
-
 @Injectable()
 export class BlockchainService implements OnModuleInit {
   private readonly logger = new Logger(BlockchainService.name);
@@ -48,6 +161,15 @@ export class BlockchainService implements OnModuleInit {
 
   /** Identity-verifier contract client. */
   private identityClient!: IdentityVerifierClient;
+
+  /** Factory contract client (RWA tokenization). */
+  private factoryClient!: FactoryClient;
+
+  /** Factory contract ID (C...). */
+  private factoryContractId!: string;
+
+  /** Soroban RPC server instance (shared across all callers). */
+  private rpcServer!: stellarRpc.Server;
 
   constructor(private readonly config: ConfigService) {}
 
@@ -83,6 +205,25 @@ export class BlockchainService implements OnModuleInit {
 
     this.logger.log(
       `IdentityVerifier client ready → contract ${net.contractId}`,
+    );
+
+    // Build the factory contract client — contract ID comes from the
+    // generated bindings (networks.testnet.contractId), not from an env var.
+    const factoryNet = factoryNetworks.testnet;
+    this.factoryContractId = factoryNet.contractId;
+    this.factoryClient = new FactoryClient({
+      contractId: factoryNet.contractId,
+      networkPassphrase: NETWORK_PASSPHRASE,
+      rpcUrl: SOROBAN_RPC_URL,
+      publicKey: this.adminAddress,
+      ...stellarContract.basicNodeSigner(this.adminKeypair, NETWORK_PASSPHRASE),
+    });
+
+    // Soroban RPC server (used by events listener + transaction submission).
+    this.rpcServer = new stellarRpc.Server(SOROBAN_RPC_URL);
+
+    this.logger.log(
+      `Factory client ready → contract ${this.factoryContractId}`,
     );
   }
 
@@ -176,5 +317,133 @@ export class BlockchainService implements OnModuleInit {
     } else if (newStatus === KybStatus.REJECTED) {
       await this.syncIdentity(user, 'kyb', false, user.companyCountry ?? '');
     }
+  }
+
+  // ─── Factory / RWA methods ────────────────────────────────────────────
+
+  /** The factory contract client (for building/simulating transactions). */
+  get factory(): FactoryClient {
+    return this.factoryClient;
+  }
+
+  /** The factory contract ID (C...). */
+  get factoryContractAddress(): string {
+    return this.factoryContractId;
+  }
+
+  /** The admin Keypair (used to sign permit messages). */
+  get adminKey(): Keypair {
+    return this.adminKeypair;
+  }
+
+  /** The admin's Stellar public key (G...). */
+  get adminPublicKey(): string {
+    return this.adminAddress;
+  }
+
+  /** The network passphrase. */
+  get networkPassphrase(): string {
+    return NETWORK_PASSPHRASE;
+  }
+
+  /** The Soroban RPC server instance. */
+  get rpc(): stellarRpc.Server {
+    return this.rpcServer;
+  }
+
+  /** Fetch the latest ledger sequence from Soroban RPC. */
+  async getLatestLedger(): Promise<number> {
+    const resp = await this.rpcServer.getLatestLedger();
+    return resp.sequence;
+  }
+
+  /**
+   * Submit a signed Soroban transaction (after DFNS signing on the frontend).
+   * Decodes the XDR and sends it to Soroban RPC.
+   */
+  async submitTransaction(signedTxXdr: string): Promise<{
+    hash: string;
+    status: string;
+    errorResultXdr: string | null;
+  }> {
+    const tx = TransactionBuilder.fromXDR(
+      signedTxXdr,
+      NETWORK_PASSPHRASE,
+    ) as Transaction;
+
+    const sent = await this.rpcServer.sendTransaction(tx);
+
+    return {
+      hash: sent.hash,
+      status: sent.status,
+      errorResultXdr: sent.errorResult?.toXDR('base64') ?? null,
+    };
+  }
+
+  /**
+   * Sign a SEP57 mint permit with the admin keypair.
+   * Returns the signature bytes.
+   */
+  signMintPermit(opts: {
+    contractAddress: string;
+    accountAddress: string;
+    amount: bigint;
+    nonce: bigint;
+    deadline: number;
+  }): Uint8Array {
+    const message = buildPermitMessage({
+      contractAddress: opts.contractAddress,
+      action: 1, // mint
+      accountAddress: opts.accountAddress,
+      amount: opts.amount,
+      nonce: opts.nonce,
+      deadline: opts.deadline,
+    });
+    return this.adminKeypair.sign(Buffer.from(message));
+  }
+
+  /**
+   * Generate all the parameters needed for a `create_rwa_token` call:
+   * salt, predicted token address, nonce, deadline, and admin-signed mint permit.
+   */
+  async prepareRwaTokenParams(opts: {
+    raiseAmount: bigint;
+    dueDays: number;
+    deadlineHours?: number;
+  }): Promise<{
+    salt: Uint8Array;
+    predictedTokenAddress: string;
+    nonce: bigint;
+    deadline: number;
+    dueLedger: number;
+    mintSignature: Uint8Array;
+  }> {
+    const salt = new Uint8Array(randomBytes(32));
+    const predictedTokenAddress = predictTokenAddress(
+      this.factoryContractId,
+      salt,
+    );
+    const latestLedger = await this.getLatestLedger();
+    const nonce = nextNonce();
+    const dueLedger = latestLedger + Math.round(opts.dueDays * LEDGERS_PER_DAY);
+    const deadline =
+      latestLedger + (opts.deadlineHours ?? 1) * LEDGERS_PER_HOUR;
+
+    const mintSignature = this.signMintPermit({
+      contractAddress: predictedTokenAddress,
+      accountAddress: this.factoryContractId,
+      amount: opts.raiseAmount,
+      nonce,
+      deadline,
+    });
+
+    return {
+      salt,
+      predictedTokenAddress,
+      nonce,
+      deadline,
+      dueLedger,
+      mintSignature,
+    };
   }
 }

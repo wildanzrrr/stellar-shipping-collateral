@@ -54,6 +54,7 @@ model User {
   signSession       SignSession[]
   investmentProfile InvestmentProfile?
   businessProfile   BusinessProfile?
+  collateral        Collateral[]
 
   // --- KYC (Sumsub) ---
   // New users are NOT verified regardless of role. This is only set to
@@ -153,4 +154,94 @@ model BusinessProfile {
   updatedAt DateTime @updatedAt
 
   @@index([userId])
+}
+
+// Collateral — links a shipping company's RWA offering to its legal
+// documents. One collateral record per on-chain RWA token. The `rwaId`
+// matches the `token_id` / `rwa_id` used on-chain by the factory contract.
+model Collateral {
+  id             String               @id @default(cuid())
+  userId         String
+  user           User                 @relation(fields: [userId], references: [id])
+  rwaId          String               @unique
+  tokenAddress   String?
+  status         CollateralStatus     @default(DRAFT)
+  collateralData Json
+  documents      CollateralDocument[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([rwaId])
+  @@index([status])
+}
+
+// Individual uploaded files attached to a collateral record.
+model CollateralDocument {
+  id           String       @id @default(cuid())
+  collateralId String
+  collateral   Collateral   @relation(fields: [collateralId], references: [id])
+  documentType DocumentType
+  gcsUri       String
+  gcsKey       String
+  fileName     String
+  mimeType     String
+  fileHash     String
+  fileSize     Int
+
+  createdAt DateTime @default(now())
+
+  @@index([collateralId])
+  @@index([documentType])
+}
+
+// On-chain event log — populated by the EventsService polling loop.
+model TransactionEvent {
+  id              String               @id @default(cuid())
+  rwaId           String
+  eventType       TransactionEventType
+  investorAddress String?
+  amount          String?
+  txHash          String
+  ledger          Int
+
+  createdAt DateTime @default(now())
+
+  @@index([rwaId])
+  @@index([eventType])
+  @@index([investorAddress])
+}
+
+// Cursor for the event listener — the last processed ledger so the
+// polling loop can resume after restart without missing events.
+model EventListenerCursor {
+  id          String   @id @default(cuid())
+  contractId  String   @unique
+  lastLedger  Int      @default(0)
+  lastEventId String?
+  updatedAt   DateTime @updatedAt
+}
+
+enum CollateralStatus {
+  DRAFT
+  SUBMITTED
+  VERIFIED
+  ON_CHAIN
+}
+
+enum DocumentType {
+  COMMERCIAL_INVOICE
+  BILL_OF_LADING
+  PROOF_OF_DELIVERY
+  SHIPPING_CONTRACT
+  NOTICE_OF_ASSIGNMENT
+}
+
+enum TransactionEventType {
+  RWA_CREATED
+  SHARES_BOUGHT
+  FUND_COLLECTED
+  DEBT_SETTLED
+  CLAIMED
 }

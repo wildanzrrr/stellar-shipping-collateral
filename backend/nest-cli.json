@@ -12,6 +12,10 @@
       {
         "include": "packages/identity_verifier/dist/**/*",
         "outDir": "dist/src"
+      },
+      {
+        "include": "packages/factory/dist/**/*",
+        "outDir": "dist/src"
       }
     ],
     "watchAssets": true
