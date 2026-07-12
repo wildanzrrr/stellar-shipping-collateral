@@ -58,8 +58,9 @@ backend/
     ├── dfns/
     │   ├── dfns.module.ts        # @Global DFNS module
     │   ├── dfns.service.ts       # DfnsApiClient initialization (OnModuleInit)
-    │   └── signer.ts             # makeSigner() — reads PEM, creates AsymmetricKeySigner
-    ├── auth/
+    │   └── signer.ts             # makeSigner() — reads PEM, creates AsymmetricKeySigner│   ├── blockchain/
+│   │   ├── blockchain.module.ts  # Exports BlockchainService
+│   │   └── blockchain.service.ts # Soroban bridge: syncs KYC/KYB → identity-verifier contract    ├── auth/
     │   ├── auth.module.ts        # imports JwtModule, UsersModule, DfnsModule, WalletsModule
     │   ├── auth.controller.ts    # /api/v1/auth/* routes (register, login, refresh, me, logout, questionnaire)
     │   ├── auth.service.ts       # DFNS orchestration + JWT issuance/rotation + wallet provisioning + questionnaire
@@ -141,6 +142,12 @@ DFNS_SERVICE_ACCOUNT_PEM_PATH="config/service-account.pem"
 # Stellar Testnet
 HORIZON_URL="https://horizon-testnet.stellar.org"
 FRIENDBOT_URL="https://friendbot.stellar.org"
+
+# Soroban — admin wallet for identity-verifier contract calls
+# Can be a Stellar secret key (S...) or raw 32-byte ed25519 seed (hex, 64 chars)
+# The same admin that deployed the identity-verifier contract must sign set_identity.
+ADMIN_SECRET=""
+SOROBAN_RPC_URL="https://soroban-testnet.stellar.org"
 ```
 
 ### Required Env Vars (validated at startup in `main.ts`)
@@ -152,6 +159,7 @@ FRIENDBOT_URL="https://friendbot.stellar.org"
 - `DFNS_ORG_ID`
 - `DFNS_API_URL`
 - `DFNS_SERVICE_ACCOUNT_CRED_ID`
+- `ADMIN_SECRET`
 
 If any are missing, the app exits immediately with `process.exit(1)`.
 
@@ -570,6 +578,58 @@ void bootstrap(); // fire-and-forget with void operator to satisfy no-floating-p
 4. **Signing**: `POST /api/v1/wallets/:walletId/sign/init` → builds Stellar tx with manageData op → `POST /api/v1/wallets/:walletId/sign/complete` → completes DFNS signing → returns signed XDR
 
 See `docs/dfns.md` for full DFNS API integration details.
+
+---
+
+## Blockchain Integration (Soroban Identity Verifier)
+
+### Overview
+
+`BlockchainService` (`src/blockchain/`) bridges off-chain KYC/KYB verification results from Sumsub to the on-chain `identity-verifier` Soroban contract. When a user's verification status reaches `COMPLETED` or `REJECTED`, the service calls the contract's `set_identity` function to record or revoke the identity on-chain.
+
+### Module Wiring
+
+```
+src/blockchain/
+├── blockchain.module.ts   # Exports BlockchainService
+└── blockchain.service.ts  # Soroban bridge (OnModuleInit)
+```
+
+- `BlockchainModule` is imported by `SumsubModule` — the webhook handler calls `syncKycStatus()` / `syncKybStatus()` after updating the DB.
+
+### How it works
+
+1. **`onModuleInit()`** — derives an admin `Keypair` from `ADMIN_SECRET` (accepts both Stellar secret key `S...` format and raw 32-byte hex seed). Creates an `IdentityVerifierClient` bound to the testnet contract, with the admin as the source account + signer.
+
+2. **`syncIdentity(user, type, verified, countryCode)`** — calls `set_identity(user, verified, country_code, role, operator)` on the identity-verifier contract. `user` = wallet address, `operator` = admin address. Signs + sends via `basicNodeSigner`. Non-blocking: errors are caught and logged — the webhook still returns 200 to Sumsub.
+
+3. **`syncKycStatus(user, newStatus)`** / **`syncKybStatus(user, newStatus)`** — convenience wrappers. Map `COMPLETED` → `verified=true`, `REJECTED` → `verified=false`. Role is `KYC` (1) or `KYB` (2) based on the verification type and user role.
+
+### Contract bindings
+
+Generated bindings live in `src/packages/identity_verifier/` (produced by `stellar contract bindings typescript`). The `dist/` folder is copied into the build output via `nest-cli.json` assets so runtime `require` resolves correctly.
+
+- Contract ID + network passphrase are baked into the bindings' `networks.testnet` constant.
+- `IdentityRole` enum: `KYC = 1`, `KYB = 2`.
+
+### Key env vars
+
+| Variable          | Description                                                                  |
+| ----------------- | ---------------------------------------------------------------------------- |
+| `ADMIN_SECRET`    | Admin wallet secret key (`S...`) or raw 32-byte ed25519 seed (hex, 64 chars) |
+| `SOROBAN_RPC_URL` | Soroban RPC endpoint (defaults to `https://soroban-testnet.stellar.org`)     |
+
+### Import note
+
+`src/packages/` is excluded from `tsconfig.json` (generated bindings only — not compiled by the backend). The `BlockchainService` imports from `'../packages/identity_verifier/dist/index.js'` using a **relative path** so it resolves at runtime. `nest-cli.json` copies `packages/identity_verifier/dist/**/*` into `dist/src/` as an asset.
+
+```json
+// nest-cli.json
+"assets": [
+  { "include": "config/**/*", "outDir": "dist" },
+  { "include": "packages/identity_verifier/dist/**/*", "outDir": "dist/src" }
+]
+```
 
 ---
 

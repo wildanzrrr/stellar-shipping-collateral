@@ -10,7 +10,7 @@
 1. **[`docs/backend.md`](docs/backend.md)** — architecture, project structure, tech stack, Prisma setup, module/feature pattern, code standards.
 2. **[`docs/auth.md`](docs/auth.md)** — authentication (DFNS passkeys + JWT access/refresh + wallet provisioning + investment profile questionnaire).
 3. **[`docs/dfns.md`](docs/dfns.md)** — DFNS integration (delegated custody, signing, wallet delegation).
-4. **[`docs/sumsub.md`](docs/sumsub.md)** — Sumsub KYC/KYB integration (access tokens, webhooks).
+4. **[`docs/sumsub.md`](docs/sumsub.md)** — Sumsub KYC/KYB integration (access tokens, webhooks, on-chain identity sync).
 5. **[`config/REQUIRED.md`](config/REQUIRED.md)** — required config files (service-account PEM, etc.).
 
 ---
@@ -40,10 +40,11 @@ backend/
 │   ├── prisma.service.ts      # PrismaClient with PrismaPg adapter
 │   ├── auth/                  # Authentication (DFNS + JWT + questionnaire)
 │   ├── dfns/                  # DFNS API client (global module)
-│   ├── sumsub/                # Sumsub KYC integration
+│   ├── blockchain/            # Soroban smart-contract bridge (identity-verifier sync)
+│   ├── sumsub/                # Sumsub KYC/KYB integration
 │   ├── users/                 # User repository (User + InvestmentProfile + BusinessProfile)
 │   ├── wallets/               # Wallet + SignSession CRUD
-│   ├── packages/              # Domain packages (compliance, factory, etc.)
+│   ├── packages/              # Generated Soroban contract bindings (identity_verifier, etc.)
 │   └── utils/                 # Shared DTOs, constants, helpers
 ├── prisma/
 │   ├── schema.prisma          # Prisma schema

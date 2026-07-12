@@ -118,13 +118,13 @@ NOT_STARTED → INIT → PENDING → COMPLETED
 
 ```
 src/sumsub/
-├── sumsub.module.ts        # imports UsersModule + JwtModule, provides SumsubService + JwtAuthGuard
+├── sumsub.module.ts        # imports UsersModule + JwtModule + BlockchainModule, provides SumsubService + JwtAuthGuard
 ├── sumsub.controller.ts    # POST /sumsub/access-token (guarded)
 ├── sumsub.dto.ts            # KycAccessTokenDTO, SumsubWebhookPayload
-└── sumsub.service.ts        # token generation, webhook handling, HMAC signing/verification
+└── sumsub.service.ts        # token generation, webhook handling, HMAC signing/verification + on-chain sync
 ```
 
-The module self-provides `JwtModule.register({})` and `JwtAuthGuard` to avoid a circular import with `AuthModule` (same pattern as `WalletsModule`).
+The module self-provides `JwtModule.register({})` and `JwtAuthGuard` to avoid a circular import with `AuthModule` (same pattern as `WalletsModule`). `BlockchainModule` is imported so the webhook handler can call `BlockchainService.syncKycStatus()` / `syncKybStatus()`.
 
 ---
 
@@ -157,6 +157,8 @@ Receives Sumsub webhook events. No auth guard — protected by HMAC signature ve
   - `applicantPending` → `PENDING`
   - `applicantOnHold` → `ON_HOLD`
   - `applicantReviewed` → `COMPLETED` (if `reviewAnswer = GREEN`) or `REJECTED` (if `RED`)
+
+After the DB is updated for `COMPLETED` or `REJECTED`, the webhook handler calls `BlockchainService.syncKycStatus()` / `syncKybStatus()` to sync the identity to the on-chain `identity-verifier` Soroban contract. On-chain sync is non-blocking — if it fails, the webhook still returns 200 so Sumsub doesn't retry. See [Blockchain Integration](backend.md#blockchain-integration-soroban-identity-verifier) in `docs/backend.md`.
 
 ---
 
