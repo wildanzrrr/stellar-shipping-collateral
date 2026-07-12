@@ -1,36 +1,35 @@
-import { Package } from "@phosphor-icons/react/dist/ssr"
+"use client"
 
-import { createMetadata } from "@/lib/seo"
+import { useSession } from "next-auth/react"
 
-export const metadata = createMetadata({
-  title: "Available collateral",
-  description:
-    "Browse tokenized maritime receivables offered as collateral by shipping companies.",
-  path: "/app/collateral",
-  noIndex: true,
-})
+import { RwaList } from "../../_components/rwa-list"
 
+/**
+ * Collateral listing page.
+ * - Shipping companies see their own issued RWAs (with "Issue collateral" CTA)
+ * - Investors see all open RWA offerings to invest in
+ */
 export default function CollateralPage() {
+  const { data: session } = useSession()
+  const role = session?.user?.role
+
+  const variant = role === "SHIPPING_COMPANY" ? "shipper" : "investor"
+
   return (
     <div className="flex flex-col gap-6 py-6">
-      <div className="flex w-full max-w-xl flex-col gap-4 text-sm">
+      <div className="flex w-full max-w-2xl flex-col gap-4 text-sm">
         <div>
-          <h1 className="text-lg font-medium">Available collateral</h1>
+          <h1 className="text-lg font-medium">
+            {variant === "shipper" ? "My collateral" : "Available collateral"}
+          </h1>
           <p className="mt-1 text-xs text-muted-foreground">
-            Browse tokenized maritime receivables offered as collateral.
+            {variant === "shipper"
+              ? "Your tokenized maritime receivables and their on-chain status."
+              : "Browse tokenized maritime receivables offered as collateral by shipping companies."}
           </p>
         </div>
 
-        <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed p-8 text-center">
-          <Package size={32} className="text-muted-foreground" />
-          <div>
-            <p className="font-medium">No offerings yet</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              When shipping companies tokenize receivables, they&rsquo;ll appear
-              here.
-            </p>
-          </div>
-        </div>
+        <RwaList variant={variant} />
       </div>
     </div>
   )

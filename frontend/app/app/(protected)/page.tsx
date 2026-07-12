@@ -9,6 +9,7 @@ import { RolePanel } from "../_components/role-panel"
 import { WalletInfo } from "../_components/wallet-info"
 import { SignMessageForm } from "../_components/sign-message-form"
 import { useSignMessage } from "../_components/use-sign-message"
+import { RwaList } from "../_components/rwa-list"
 
 export default function AppDashboard() {
   const { data: session } = useSession()
@@ -61,6 +62,20 @@ export default function AppDashboard() {
           statusMsg={sign.statusMsg}
           walletId={walletId}
         />
+
+        {/* Role-specific RWA list */}
+        {role && (
+          <div className="flex flex-col gap-2 border-t pt-4">
+            <h2 className="text-sm font-medium">
+              {role === "SHIPPING_COMPANY"
+                ? "My collateral"
+                : "Available offerings"}
+            </h2>
+            <RwaList
+              variant={role === "SHIPPING_COMPANY" ? "shipper" : "investor"}
+            />
+          </div>
+        )}
       </div>
     </div>
   )

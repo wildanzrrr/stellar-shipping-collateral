@@ -9,6 +9,7 @@ import {
   Query,
   Req,
   UseGuards,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
@@ -80,7 +81,9 @@ export class RwaController {
     @Body() payload: CreateRwaTokenDTO,
   ) {
     if (!req.user.walletAddress) {
-      throw new Error('Wallet address required to create RWA token');
+      throw new BadRequestException(
+        'Wallet address required to create RWA token',
+      );
     }
     return this.rwaService.prepareCreateRwaToken(
       req.user.walletAddress,
@@ -101,7 +104,7 @@ export class RwaController {
     @Param('rwaId') rwaId: string,
   ) {
     if (!req.user.walletAddress) {
-      throw new Error('Wallet address required');
+      throw new BadRequestException('Wallet address required');
     }
     return this.rwaService.prepareCollectFund(rwaId, req.user.walletAddress);
   }
@@ -120,7 +123,7 @@ export class RwaController {
     @Body() payload: SettleDebtDTO,
   ) {
     if (!req.user.walletAddress) {
-      throw new Error('Wallet address required');
+      throw new BadRequestException('Wallet address required');
     }
     return this.rwaService.prepareSettleDebt(
       rwaId,

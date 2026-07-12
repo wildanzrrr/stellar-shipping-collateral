@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from 'src/prisma.service';
-import { generateCustomId } from 'src/utils/utils';
 import {
   Prisma,
   Collateral,

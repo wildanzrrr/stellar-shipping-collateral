@@ -293,3 +293,255 @@ export const sumsubApi = {
       headers: bearer(accessToken),
     }),
 }
+
+// ---- RWA / factory contract (protected) ----
+
+export type RwaStatus = "Open" | "Funded" | "Settled" | "Unknown"
+
+export interface RwaSummary {
+  id: string
+  shipper: string
+  token: string | null
+  status: RwaStatus
+  raiseAmount: string
+  interestBps: number
+  sharesBought: string
+  sharesTotal: string
+  dueLedger: number
+  collateral: CollateralRecord | null
+}
+
+export interface RwaDetail extends RwaSummary {
+  interestPool: string
+  principalPool: string
+  protocolFeeBps: number
+  protocolFeePool: string
+  sharesReserved: string
+  investors: number
+  events: TransactionEvent[]
+}
+
+export interface TransactionEvent {
+  id: string
+  rwaId: string
+  eventType: string
+  investorAddress: string | null
+  amount: string | null
+  txHash: string | null
+  ledger: number
+  createdAt: string
+}
+
+export interface PreparedTx {
+  txXdr: string
+  tokenId?: string
+  predictedTokenAddress?: string
+  raiseAmount?: string
+  interestBps?: string
+  dueLedger?: number
+  deadline?: number
+  nonce?: string
+  salt?: string
+  rwaId?: string
+  shipper?: string
+  principalAmount?: string
+}
+
+export interface SubmitTxResult {
+  hash: string
+  status: string
+  errorResult: string | null
+}
+
+export const rwaApi = {
+  list: (accessToken: string, page = 1, limit = 20) =>
+    req<{ items: RwaSummary[]; total: number; page: number; limit: number }>(
+      `/rwa?page=${page}&limit=${limit}`,
+      { headers: bearer(accessToken) }
+    ),
+  getRwa: (accessToken: string, rwaId: string) =>
+    req<RwaDetail>(`/rwa/${encodeURIComponent(rwaId)}`, {
+      headers: bearer(accessToken),
+    }),
+  getInvestors: (accessToken: string, rwaId: string) =>
+    req<{ rwaId: string; investors: TransactionEvent[] }>(
+      `/rwa/${encodeURIComponent(rwaId)}/investors`,
+      { headers: bearer(accessToken) }
+    ),
+  listEvents: (accessToken: string) =>
+    req<{ items: TransactionEvent[] }>(`/rwa/events`, {
+      headers: bearer(accessToken),
+    }),
+  prepareCreateRwaToken: (accessToken: string, body: CreateRwaTokenPayload) =>
+    req<PreparedTx>("/rwa/create-token", {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify(body),
+    }),
+  prepareCollectFund: (accessToken: string, rwaId: string) =>
+    req<PreparedTx>(`/rwa/${encodeURIComponent(rwaId)}/collect-fund`, {
+      method: "POST",
+      headers: bearer(accessToken),
+    }),
+  prepareSettleDebt: (
+    accessToken: string,
+    rwaId: string,
+    principalAmount: string
+  ) =>
+    req<PreparedTx>(`/rwa/${encodeURIComponent(rwaId)}/settle-debt`, {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify({ principalAmount }),
+    }),
+  submitTransaction: (accessToken: string, signedTxXdr: string) =>
+    req<SubmitTxResult>("/rwa/submit", {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify({ signedTxXdr }),
+    }),
+}
+
+// ---- collateral (protected) ----
+
+export type CollateralStatus = "DRAFT" | "SUBMITTED" | "VERIFIED" | "ON_CHAIN"
+export type DocumentTypeKey =
+  | "COMMERCIAL_INVOICE"
+  | "BILL_OF_LADING"
+  | "PROOF_OF_DELIVERY"
+  | "SHIPPING_CONTRACT"
+  | "NOTICE_OF_ASSIGNMENT"
+
+export interface CollateralRecord {
+  id: string
+  rwaId: string
+  tokenAddress: string | null
+  status: CollateralStatus
+  collateralData: Record<string, unknown> | null
+  documents?: CollateralDocument[]
+  user?: { id: string; email: string; companyName?: string | null }
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CollateralDocument {
+  id: string
+  documentType: DocumentTypeKey
+  fileName: string
+  mimeType: string
+  fileHash: string
+  gcsUri: string
+  createdAt: string
+}
+
+export interface CreateRwaTokenPayload {
+  tokenId: string
+  raiseAmount: string
+  interestBps: string
+  dueDays: number
+  name: string
+  symbol: string
+}
+
+export const collateralApi = {
+  create: (
+    accessToken: string,
+    body: {
+      rwaId: string
+      tokenAddress?: string
+      collateralData?: Record<string, unknown>
+    }
+  ) =>
+    req<{ id: string; rwaId: string; status: CollateralStatus }>(
+      "/collateral",
+      {
+        method: "POST",
+        headers: bearer(accessToken),
+        body: JSON.stringify(body),
+      }
+    ),
+  list: (accessToken: string, page = 1, limit = 10) =>
+    req<{
+      items: CollateralRecord[]
+      total: number
+      page: number
+      limit: number
+    }>(`/collateral?page=${page}&limit=${limit}`, {
+      headers: bearer(accessToken),
+    }),
+  getById: (accessToken: string, id: string) =>
+    req<CollateralRecord>(`/collateral/${encodeURIComponent(id)}`, {
+      headers: bearer(accessToken),
+    }),
+  update: (
+    accessToken: string,
+    id: string,
+    body: {
+      tokenAddress?: string
+      status?: CollateralStatus
+      collateralData?: Record<string, unknown>
+    }
+  ) =>
+    req<{ id: string; rwaId: string; status: CollateralStatus }>(
+      `/collateral/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        headers: bearer(accessToken),
+        body: JSON.stringify(body),
+      }
+    ),
+  uploadDocument: async (
+    accessToken: string,
+    collateralId: string,
+    file: File,
+    documentType: DocumentTypeKey
+  ): Promise<{
+    id: string
+    documentType: DocumentTypeKey
+    fileName: string
+    fileHash: string
+    gcsUri: string
+  }> => {
+    const form = new FormData()
+    form.append("file", file)
+    form.append("documentType", documentType)
+    const r = await fetch(
+      `${base}/collateral/${encodeURIComponent(collateralId)}/documents`,
+      {
+        method: "POST",
+        headers: bearer(accessToken),
+        body: form,
+      }
+    )
+    if (!r.ok) {
+      let message = `${r.status}`
+      try {
+        const body: unknown = await r.json()
+        if (body && typeof body === "object" && "message" in body) {
+          const m = (body as { message: unknown }).message
+          message = Array.isArray(m) ? m.join(", ") : String(m)
+        }
+      } catch {
+        message = `${r.status} ${await r.text()}`
+      }
+      throw new Error(message)
+    }
+    const json = (await r.json()) as Wrapped<{
+      id: string
+      documentType: DocumentTypeKey
+      fileName: string
+      fileHash: string
+      gcsUri: string
+    }>
+    return json.data
+  },
+  getDocumentUrl: (accessToken: string, collateralId: string, docId: string) =>
+    req<{
+      id: string
+      fileName: string
+      signedUrl: string
+      expiresInSeconds: number
+    }>(
+      `/collateral/${encodeURIComponent(collateralId)}/documents/${encodeURIComponent(docId)}`,
+      { headers: bearer(accessToken) }
+    ),
+}
