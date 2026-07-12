@@ -3,17 +3,7 @@
 import Link from "next/link"
 import { ArrowLeft } from "@phosphor-icons/react/dist/ssr"
 
-import { createMetadata } from "@/lib/seo"
-
 import { IssueCollateralForm } from "./issue-collateral-form"
-
-export const metadata = createMetadata({
-  title: "Issue Collateral",
-  description:
-    "Tokenize a maritime receivable and create an on-chain RWA collateral record.",
-  path: "/app/collateral/new",
-  noIndex: true,
-})
 
 export default function NewCollateralPage() {
   return (

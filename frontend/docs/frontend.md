@@ -57,19 +57,19 @@ frontend/
 │   ├── api/                      # route handlers (e.g. auth/[...nextauth])
 │   └── app/                      # "/app" authenticated product
 │       ├── layout.tsx            # SessionProvider + QueryProvider shell
-│       ├── page.tsx              # dashboard (role-aware)
-│       ├── (protected)/
-│       │   └── profile/
-│       │       ├── page.tsx          # user profile (account + investment/business profile)
-│       │       ├── kyc/
-│       │       │   ├── page.tsx          # KYC: questionnaire → Sumsub WebSDK
-│       │       │   └── _components/      # questionnaire-data.ts, investment-questionnaire.tsx
-│       │       └── kyb/
-│       │           ├── page.tsx          # KYB: questionnaire → Sumsub WebSDK
-│       │           └── _components/      # questionnaire-data.ts (BUSINESS_QUESTIONS)
-│       └── auth/
-│           ├── page.tsx          # thin composer
-│           └── _components/      # route-private building blocks
+│       ├── _components/           # shared app building blocks (role-panel, rwa-list, wallet-modal, …)
+│       ├── auth/                 # login/register (passkey flow)
+│       └── (protected)/
+│           ├── page.tsx          # dashboard (role-aware, full-width RWA list)
+│           ├── collateral/       # collateral list + new + [rwaId] detail
+│           ├── history/          # on-chain event log
+│           └── profile/          # user profile (account + investment/business profile)
+│               ├── kyc/
+│               │   ├── page.tsx          # KYC: questionnaire → Sumsub WebSDK
+│               │   └── _components/      # questionnaire-data.ts, investment-questionnaire.tsx
+│               └── kyb/
+│                   ├── page.tsx          # KYB: questionnaire → Sumsub WebSDK
+│                   └── _components/      # questionnaire-data.ts (BUSINESS_QUESTIONS)
 ├── components/
 │   ├── ui/                       # shadcn components (button, card, sonner, …)
 │   ├── landing/                  # landing-only components (bk-* design system)
@@ -97,7 +97,7 @@ Path alias: **`@/*` → project root** (e.g. `@/components/ui/button`, `@/lib/ap
 - **App Router only.** Routes are folders with `page.tsx`; nested layouts with `layout.tsx`.
 - **Route-private components go in a `_components/` folder** next to the route that owns them (the `_` prefix excludes it from routing). Only promote to `components/` when a piece is genuinely shared across routes. Example: `app/app/(protected)/profile/kyc/_components/` holds the questionnaire data and form components.
 - **Keep `page.tsx` thin.** A page composes building blocks; it should not hold large JSX or business logic. See `app/app/auth/page.tsx` — it only provides the `Suspense` boundary and renders `<AuthPanel/>`.
-- **Metadata comes from the factory.** Use `createMetadata({ title, description, path, noIndex? })` from [`lib/seo.ts`](../lib/seo.ts) in a `layout.tsx` (client pages can't export `metadata`, so put it on the segment layout).
+- **Metadata comes from the factory, on a layout.** Use `createMetadata({ title, description, path, noIndex? })` from [`lib/seo.ts`](../lib/seo.ts). **Never export `metadata` from a `"use client"` file** — Next.js 16 will fail the production build. Client pages (`collateral/new`, `history`, dashboard, etc.) omit `metadata`; put it on the segment `layout.tsx` (a Server Component) if the route needs it.
 - **`useSearchParams` needs a `Suspense` boundary** above it — a component can't both call it and be its own boundary. That's why auth pages split page → `Suspense` → panel.
 
 ---
@@ -166,6 +166,13 @@ Rules:
 - Protect `/app/*` via [`proxy.ts`](../proxy.ts) (not per-page auth checks, though a client redirect is fine as defense-in-depth).
 - Send `session.accessToken` as the bearer through `walletApi` helpers — never re-implement the header.
 - Extend the session shape only by editing [`types/next-auth.d.ts`](../types/next-auth.d.ts) **and** the `authorize`/`jwt`/`session` callbacks in `auth.ts` together.
+
+### KYB guard on issue collateral
+
+Shipping companies must complete KYB before issuing collateral. This is enforced **both** client-side and server-side:
+
+- **`RwaList`** (shipper variant) accepts a `kybStatus` prop. When `kybStatus !== "COMPLETED"`, the "Issue collateral" button is disabled with a native `title` tooltip ("Complete KYB verification first").
+- **Backend** `CollateralService.create()` throws `ForbiddenException` if the user is not `SHIPPING_COMPANY` or `kybStatus !== COMPLETED`. See [`backend/docs/sumsub.md`](../../../backend/docs/sumsub.md) §8.1.
 
 ---
 

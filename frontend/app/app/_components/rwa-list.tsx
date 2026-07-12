@@ -7,8 +7,18 @@ import { Package, Plus } from "@phosphor-icons/react/dist/ssr"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
-import { rwaApi, type RwaSummary, type RwaStatus } from "@/lib/api"
+import {
+  rwaApi,
+  type KybStatus,
+  type RwaSummary,
+  type RwaStatus,
+} from "@/lib/api"
 
 const STATUS_STYLES: Record<RwaStatus, string> = {
   Open: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
@@ -36,14 +46,17 @@ function formatBps(bps: string | number): string {
 interface RwaListProps {
   /** Shipping company sees their own RWAs; investor sees all open offerings. */
   variant: "shipper" | "investor"
+  /** Shipper only — disables "Issue collateral" until KYB is completed. */
+  kybStatus?: KybStatus
 }
 
 /**
  * Lists RWAs from the factory contract, joined with local collateral data.
  * - Shipper variant: shows "Issue collateral" button + their RWAs
+ *   (button is disabled until KYB status is COMPLETED)
  * - Investor variant: shows all open RWAs as investable offerings
  */
-export function RwaList({ variant }: RwaListProps) {
+export function RwaList({ variant, kybStatus }: RwaListProps) {
   const { data: session } = useSession()
   const accessToken = session?.accessToken ?? ""
 
@@ -63,6 +76,8 @@ export function RwaList({ variant }: RwaListProps) {
     )
   }
 
+  const kybOk = kybStatus === "COMPLETED"
+
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed p-8 text-center">
@@ -79,14 +94,27 @@ export function RwaList({ variant }: RwaListProps) {
               : "When shipping companies tokenize receivables, they'll appear here."}
           </p>
         </div>
-        {variant === "shipper" && (
-          <Button asChild size="sm">
-            <Link href="/app/collateral/new">
-              <Plus size={16} />
-              Issue collateral
-            </Link>
-          </Button>
-        )}
+        {variant === "shipper" &&
+          (kybOk ? (
+            <Button asChild size="sm">
+              <Link href="/app/collateral/new">
+                <Plus size={16} />
+                Issue collateral
+              </Link>
+            </Button>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span tabIndex={0} className="inline-block">
+                  <Button size="sm" disabled>
+                    <Plus size={16} />
+                    Issue collateral
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Complete KYB verification first</TooltipContent>
+            </Tooltip>
+          ))}
       </div>
     )
   }
@@ -95,12 +123,26 @@ export function RwaList({ variant }: RwaListProps) {
     <div className="flex flex-col gap-2">
       {variant === "shipper" && (
         <div className="flex justify-end">
-          <Button asChild size="sm">
-            <Link href="/app/collateral/new">
-              <Plus size={16} />
-              Issue collateral
-            </Link>
-          </Button>
+          {kybOk ? (
+            <Button asChild size="sm">
+              <Link href="/app/collateral/new">
+                <Plus size={16} />
+                Issue collateral
+              </Link>
+            </Button>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span tabIndex={0} className="inline-block">
+                  <Button size="sm" disabled>
+                    <Plus size={16} />
+                    Issue collateral
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Complete KYB verification first</TooltipContent>
+            </Tooltip>
+          )}
         </div>
       )}
       <div className="flex flex-col gap-2">

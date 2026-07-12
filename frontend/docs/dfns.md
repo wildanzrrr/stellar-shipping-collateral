@@ -53,15 +53,25 @@ NEXT_PUBLIC_BE_URL=http://localhost:2000
 
 ## 3. Project structure (frontend)
 
+The FE is organized under `app/app/` (authenticated product) and `app/app/auth/` (login/register):
+
 ```
 frontend/
 └── app/
-    ├── page.tsx              # the whole UI: username input, status, sign button
-    └── lib/
-        └── api.ts            # typed wrapper around fetch → BE
+    └── app/
+        ├── auth/_components/         # passkey register/login flow (use-auth-flow.ts)
+        ├── _components/               # shared app building blocks
+        │   ├── role-panel.tsx         # role-aware dashboard panel
+        │   ├── rwa-list.tsx           # role-gated RWA/collateral listings
+        │   ├── wallet-modal.tsx       # wallet pill → modal (balances, QR, transfer)
+        │   └── app-navbar.tsx        # top nav with WalletModal
+        └── (protected)/
+            ├── page.tsx             # dashboard — full-width RWA list, no DFNS demo widgets
+            ├── collateral/          # collateral list + new + [rwaId] detail
+            └── history/             # on-chain event log
 ```
 
-There is no separate "auth context" or store — the username is the only stateful input.
+The early DFNS "sign a message" demo (`sign-message-form.tsx`, `use-sign-message.ts`, `wallet-info.tsx`) was removed from the dashboard — signing now happens only through real flows (issue collateral, collect funds, settle debt, transfer) via the `use-tx-action.ts` / `use-transfer.ts` hooks.
 
 ---
 

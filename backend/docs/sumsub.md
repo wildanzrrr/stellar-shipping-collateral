@@ -210,13 +210,15 @@ KYB (Know Your Business) is a second verification tier for `SHIPPING_COMPANY` us
 User registers (SHIPPING_COMPANY)
   → Business questionnaire (5 questions about shipping operations)
     → KYB (company registry + AML checks)
-      → KYB COMPLETED → can tokenize RWAs
+      → KYB COMPLETED → can tokenize RWAs (issue collateral)
 
 User registers (INVESTOR)
   → Investment questionnaire (5 questions about investor profile)
     → KYC (individual identity verification)
       → KYC COMPLETED → full access
 ```
+
+> **Guard**: `CollateralService.create()` enforces that the caller is `SHIPPING_COMPANY` **and** `kybStatus === COMPLETED` before creating a collateral record. A `ForbiddenException` is thrown otherwise. The frontend mirrors this — the "Issue collateral" button is disabled and the `/app/collateral/new` page shows a KYB warning instead of the form until KYB is completed.
 
 Shipping companies skip KYC — they do not need individual identity verification, only business verification. The KYB flow mirrors the KYC flow: a questionnaire phase first, then the Sumsub WebSDK.
 

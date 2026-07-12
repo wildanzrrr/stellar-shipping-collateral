@@ -8,11 +8,6 @@ import { Receipt } from "@phosphor-icons/react/dist/ssr"
 import { Badge } from "@/components/ui/badge"
 import { rwaApi, type TransactionEvent } from "@/lib/api"
 
-export const metadata = {
-  title: "History",
-  description: "Your transaction and event history.",
-}
-
 const EVENT_LABELS: Record<string, string> = {
   RWA_CREATED: "RWA Created",
   SHARES_BOUGHT: "Shares Bought",

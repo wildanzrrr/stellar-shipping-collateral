@@ -81,6 +81,12 @@ backend/
     │   ├── wallets.controller.ts  # POST api/v1/wallets, /:walletId/delegate, /:walletId/sign/init, /:walletId/sign/complete
     │   ├── wallets.service.ts     # Business logic: create wallet, delegate, sign via DFNS + Stellar SDK
     │   └── wallets.repository.ts  # All Prisma calls for Wallet + SignSession models
+    ├── collateral/
+    │   ├── collateral.module.ts   # imports UsersModule (for KYB guard)
+    │   ├── collateral.controller.ts # /api/v1/collateral CRUD + document upload/download
+    │   ├── collateral.service.ts  # Collateral logic — create() guards: SHIPPING_COMPANY + kybStatus COMPLETED
+    │   ├── collateral.repository.ts # Prisma calls for Collateral + CollateralDocument
+    │   └── collateral.dto.ts      # Create/Update/Query DTOs
     └── utils/
         ├── dto.ts                 # SuccessResponseDTO, BaseQueryDTO
         ├── utils.ts               # generateCustomId(), generateRandomString()

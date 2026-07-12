@@ -4,12 +4,14 @@ import {
   Logger,
   NotFoundException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
 import {
   CollateralRepository,
   CollateralWithDocuments,
 } from './collateral.repository';
 import { StorageService } from 'src/storage/storage.service';
+import { UsersRepository } from 'src/users/users.repository';
 import { SuccessResponseDTO } from 'src/utils/dto';
 import { generateCustomId } from 'src/utils/utils';
 import {
@@ -21,6 +23,7 @@ import {
 import {
   CollateralStatus,
   DocumentType,
+  KybStatus,
   Prisma,
 } from 'prisma/generated/prisma/client';
 
@@ -31,6 +34,7 @@ export class CollateralService {
   constructor(
     private readonly collateralRepository: CollateralRepository,
     private readonly storage: StorageService,
+    private readonly usersRepository: UsersRepository,
   ) {}
 
   /** Create a new collateral record for a shipping company. */
@@ -43,6 +47,22 @@ export class CollateralService {
         userId,
         rwaId: payload.rwaId,
       });
+
+      // Verify the user is a shipping company with completed KYB.
+      const user = await this.usersRepository.get({ id: userId });
+      if (!user) {
+        throw new ForbiddenException('User not found');
+      }
+      if (user.role !== 'SHIPPING_COMPANY') {
+        throw new ForbiddenException(
+          'Only shipping companies can create collateral',
+        );
+      }
+      if (user.kybStatus !== KybStatus.COMPLETED) {
+        throw new ForbiddenException(
+          'KYB verification must be completed before issuing collateral',
+        );
+      }
 
       // Check for duplicate rwaId
       const existing = await this.collateralRepository.findByRwaId(
