@@ -140,7 +140,6 @@ export default function CollateralDetailPage() {
   const collateral = rwa?.collateral ?? collateralQuery.data ?? null
 
   const [buyAmount, setBuyAmount] = useState("")
-  const [settleAmount, setSettleAmount] = useState("")
   const [claimAmount, setClaimAmount] = useState("")
 
   const tokenInfo = getTokenNameSymbol(collateral)
@@ -157,6 +156,18 @@ export default function CollateralDetailPage() {
   const sharesTotalNum = rwa ? Number(rwa.sharesTotal) : 0
   const sharesBoughtNum = rwa ? Number(rwa.sharesBought) : 0
   const sharesAvailableNum = Math.max(0, sharesTotalNum - sharesBoughtNum)
+
+  // `collect_fund` transfers the full raised amount in one shot and can't be
+  // repeated, so once a FUND_COLLECTED event lands the action is spent.
+  const fundsCollected = Boolean(
+    rwa?.events?.some((e) => e.eventType === "FUND_COLLECTED")
+  )
+
+  // `settle_debt` flips the offering to Settled on the first call, so it's a
+  // one-shot: the shipper repays the full principal owed once, then it's done.
+  const debtSettled =
+    rwa?.status === "Settled" ||
+    Boolean(rwa?.events?.some((e) => e.eventType === "DEBT_SETTLED"))
   const fundedPct =
     sharesTotalNum > 0
       ? Math.min(100, Math.round((sharesBoughtNum / sharesTotalNum) * 100))
@@ -199,11 +210,13 @@ export default function CollateralDetailPage() {
   }
 
   async function handleSettleDebt() {
-    let amountRaw: string
-    try {
-      amountRaw = toBaseUnits(settleAmount)
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Invalid amount")
+    if (!rwa) return
+    // Always settle the full principal owed (= shares bought, 1:1 USDC). The
+    // contract flips the offering to Settled on the first call, so this is a
+    // single full repayment rather than a partial/editable amount.
+    const amountRaw = rwa.sharesBought
+    if (Number(amountRaw) <= 0) {
+      toast.error("There is no principal to settle yet")
       return
     }
     try {
@@ -216,10 +229,7 @@ export default function CollateralDetailPage() {
         () => rwaApi.prepareSettleDebt(accessToken, rwaId, amountRaw),
         "Settle debt"
       )
-      if (hash) {
-        setSettleAmount("")
-        invalidate()
-      }
+      if (hash) invalidate()
     } catch {
       /* error toast surfaced by useTxAction */
     }
@@ -494,46 +504,53 @@ export default function CollateralDetailPage() {
             <div className="flex flex-col gap-2 rounded-md border p-3">
               <span className="text-xs font-medium">Collect raised funds</span>
               <p className="text-[11px] text-muted-foreground">
-                Withdraw USDC bought by investors so far.
+                {fundsCollected
+                  ? `Collected ${formatAmount(rwa.sharesBought)} USDC from this offering.`
+                  : "Withdraw USDC bought by investors so far."}
               </p>
               <Button
                 size="sm"
                 variant="outline"
                 className="w-fit"
-                disabled={txAction.isPending || Number(rwa.sharesBought) <= 0}
+                disabled={
+                  txAction.isPending ||
+                  Number(rwa.sharesBought) <= 0 ||
+                  fundsCollected
+                }
                 onClick={handleCollectFund}
               >
                 <Coins size={16} />
-                Collect Funds
+                {fundsCollected ? "Funds Collected" : "Collect Funds"}
               </Button>
             </div>
 
             <div className="flex flex-col gap-2 rounded-md border p-3">
               <span className="text-xs font-medium">Settle debt</span>
               <p className="text-[11px] text-muted-foreground">
-                Repay principal so investors can claim. Requires a USDC approval
-                first.
+                {debtSettled
+                  ? "Debt settled — investors can now claim their principal and interest."
+                  : "Repay the full principal in one payment so investors can claim. Requires a USDC approval first."}
               </p>
-              <div className="flex gap-2">
-                <Input
-                  type="number"
-                  step="any"
-                  placeholder="Amount (USDC)"
-                  value={settleAmount}
-                  onChange={(e) => setSettleAmount(e.target.value)}
-                  disabled={txAction.isPending}
-                  className="h-8 max-w-45"
-                />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={txAction.isPending || !settleAmount}
-                  onClick={handleSettleDebt}
-                >
-                  <Bank size={16} />
-                  Settle Debt
-                </Button>
-              </div>
+              {sharesBoughtNum > 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  Principal owed:{" "}
+                  <span className="font-medium text-foreground">
+                    ${formatAmount(rwa.sharesBought)}
+                  </span>
+                </p>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-fit"
+                disabled={
+                  txAction.isPending || sharesBoughtNum <= 0 || debtSettled
+                }
+                onClick={handleSettleDebt}
+              >
+                <Bank size={16} />
+                {debtSettled ? "Debt Settled" : "Settle Debt"}
+              </Button>
             </div>
           </div>
         )}

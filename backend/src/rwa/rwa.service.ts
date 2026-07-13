@@ -333,14 +333,25 @@ export class RwaService {
     try {
       this.logger.debug('Preparing collect_fund', { rwaId, shipperAddress });
 
-      const tx = await this.blockchain.factory.collect_fund({
+      // collect_fund calls shipper.require_auth(), so the shipper must be the tx
+      // source (signed at the envelope level by DFNS). Build with the shipper
+      // factory — using the admin-signer factory makes the admin the source and
+      // the shipper's require_auth can never be satisfied (Auth, InvalidAction).
+      const shipperFactory = this.blockchain.factoryForShipper(shipperAddress);
+      const tx = await shipperFactory.collect_fund({
         rwa_id: rwaId,
         shipper: shipperAddress,
       });
 
       const assembledTx = await tx.simulate();
       assertSimulationSucceeded(assembledTx, 'collect_fund');
-      const txXdr = assembledTx.built?.toXDR('base64');
+      // Rewrite the shipper's address-credential auth to source-account
+      // credentials, satisfied by the DFNS envelope signature.
+      const txXdr = assembledTx.built
+        ? this.blockchain.convertShipperAuthToSourceAccount(
+            assembledTx.built.toXDR('base64'),
+          )
+        : undefined;
 
       return {
         success: true,
@@ -372,7 +383,12 @@ export class RwaService {
 
       const principalAmount = BigInt(payload.principalAmount);
 
-      const tx = await this.blockchain.factory.settle_debt({
+      // settle_debt calls shipper.require_auth(), so the shipper must be the tx
+      // source (signed at the envelope level by DFNS). Build with the shipper
+      // factory so the require_auth resolves to the source account rather than
+      // the admin (which would fail with Auth, InvalidAction).
+      const shipperFactory = this.blockchain.factoryForShipper(shipperAddress);
+      const tx = await shipperFactory.settle_debt({
         rwa_id: rwaId,
         shipper: shipperAddress,
         principal_amount: principalAmount as any,
@@ -380,7 +396,13 @@ export class RwaService {
 
       const assembledTx = await tx.simulate();
       assertSimulationSucceeded(assembledTx, 'settle_debt');
-      const txXdr = assembledTx.built?.toXDR('base64');
+      // Rewrite the shipper's address-credential auth to source-account
+      // credentials, satisfied by the DFNS envelope signature.
+      const txXdr = assembledTx.built
+        ? this.blockchain.convertShipperAuthToSourceAccount(
+            assembledTx.built.toXDR('base64'),
+          )
+        : undefined;
 
       return {
         success: true,
@@ -462,7 +484,8 @@ export class RwaService {
         amount: amount.toString(),
       });
 
-      const investorFactory = this.blockchain.factoryForShipper(investorAddress);
+      const investorFactory =
+        this.blockchain.factoryForShipper(investorAddress);
       const tx = await investorFactory.buy_shares({
         rwa_id: rwaId,
         investor: investorAddress,
@@ -525,7 +548,8 @@ export class RwaService {
           amount,
         });
 
-      const investorFactory = this.blockchain.factoryForShipper(investorAddress);
+      const investorFactory =
+        this.blockchain.factoryForShipper(investorAddress);
       const tx = await investorFactory.claim({
         rwa_id: rwaId,
         investor: investorAddress,
@@ -644,7 +668,7 @@ export class RwaService {
     const out: Array<[string, bigint]> = [];
     if (inv instanceof Map) {
       for (const [k, v] of inv.entries()) {
-        out.push([String(k), BigInt(v as unknown as string)]);
+        out.push([String(k), BigInt(v)]);
       }
       return out;
     }
@@ -655,14 +679,14 @@ export class RwaService {
     // Array/indexed-object of [address, amount] tuples.
     if (values.every((e) => Array.isArray(e) && e.length >= 2)) {
       for (const entry of values as unknown[][]) {
-        out.push([String(entry[0]), BigInt(entry[1] as unknown as string)]);
+        out.push([String(entry[0]), BigInt(entry[1] as string)]);
       }
       return out;
     }
 
     // Fallback: plain object keyed by address.
     for (const [k, v] of Object.entries(inv as Record<string, unknown>)) {
-      out.push([k, BigInt(v as unknown as string)]);
+      out.push([k, BigInt(v as string)]);
     }
     return out;
   }
