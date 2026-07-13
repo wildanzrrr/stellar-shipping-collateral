@@ -43,6 +43,7 @@ backend/
 │   ├── dfns/                  # DFNS API client (global module)
 │   ├── blockchain/            # Soroban smart-contract bridge (identity sync + RWA tx assembly)
 │   ├── rwa/                   # RWA offerings: create_rwa_token / approve / collect / settle (see docs/rwa.md)
+│   ├── events/                # Soroban event poller → DB sync (factory events, collateral status)
 │   ├── sumsub/                # Sumsub KYC/KYB integration
 │   ├── users/                 # User repository (User + InvestmentProfile + BusinessProfile)
 │   ├── wallets/               # Wallet + SignSession CRUD

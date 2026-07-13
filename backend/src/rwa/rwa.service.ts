@@ -126,11 +126,11 @@ export class RwaService {
             shipper: r.shipper,
             token: r.token,
             status: this.mapRwaStatus(r.status),
-            raiseAmount: r.raise_amount,
-            interestBps: r.interest_bps,
-            sharesBought: r.shares_bought,
-            sharesTotal: r.shares_total,
-            dueLedger: r.due_ledger,
+            raiseAmount: r.raise_amount.toString(),
+            interestBps: Number(r.interest_bps),
+            sharesBought: r.shares_bought.toString(),
+            sharesTotal: r.shares_total.toString(),
+            dueLedger: Number(r.due_ledger),
             collateral: collateral ?? null,
           };
         }),
@@ -455,22 +455,30 @@ export class RwaService {
   // ─── helpers ──────────────────────────────────────────────────────────
 
   private parseRwaStruct(rwa: RWA): Record<string, unknown> {
+    // `investors` is an on-chain Map<address, shares>; the API exposes its size.
+    const investorCount =
+      rwa.investors instanceof Map
+        ? rwa.investors.size
+        : rwa.investors
+          ? Object.keys(rwa.investors).length
+          : 0;
+
     return {
       id: rwa.id,
       shipper: rwa.shipper,
       token: rwa.token,
       status: this.mapRwaStatus(rwa.status),
-      raiseAmount: rwa.raise_amount,
-      interestBps: rwa.interest_bps,
-      interestPool: rwa.interest_pool,
-      principalPool: rwa.principal_pool,
-      protocolFeeBps: rwa.protocol_fee_bps,
-      protocolFeePool: rwa.protocol_fee_pool,
-      sharesBought: rwa.shares_bought,
-      sharesTotal: rwa.shares_total,
-      sharesReserved: rwa.shares_reserved,
-      dueLedger: rwa.due_ledger,
-      investors: rwa.investors,
+      raiseAmount: rwa.raise_amount.toString(),
+      interestBps: Number(rwa.interest_bps),
+      interestPool: rwa.interest_pool.toString(),
+      principalPool: rwa.principal_pool.toString(),
+      protocolFeeBps: Number(rwa.protocol_fee_bps),
+      protocolFeePool: rwa.protocol_fee_pool.toString(),
+      sharesBought: rwa.shares_bought.toString(),
+      sharesTotal: rwa.shares_total.toString(),
+      sharesReserved: rwa.shares_reserved.toString(),
+      dueLedger: Number(rwa.due_ledger),
+      investors: investorCount,
     };
   }
 

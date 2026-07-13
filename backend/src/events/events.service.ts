@@ -1,53 +1,89 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { xdr } from '@stellar/stellar-sdk';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
+import { scValToNative } from '@stellar/stellar-sdk';
 import { RwaRepository } from 'src/rwa/rwa.repository';
+import { CollateralRepository } from 'src/collateral/collateral.repository';
 import { BlockchainService } from 'src/blockchain/blockchain.service';
-import { TransactionEventType } from 'prisma/generated/prisma/client';
+import {
+  TransactionEventType,
+  CollateralStatus,
+} from 'prisma/generated/prisma/client';
 
-/** Event name → TransactionEventType mapping */
+/**
+ * Factory contract event name (snake_case, as emitted by `#[contractevent]`)
+ * → our `TransactionEventType`. The event name is the FIRST topic of every
+ * event; `#[contractevent]` lower-snake-cases the struct name, so `RWACreated`
+ * is emitted as `rwa_created`.
+ */
 const EVENT_TYPE_MAP: Record<string, TransactionEventType> = {
-  RWACreated: 'RWA_CREATED' as TransactionEventType,
-  SharesBought: 'SHARES_BOUGHT' as TransactionEventType,
-  FundCollected: 'FUND_COLLECTED' as TransactionEventType,
-  DebtSettled: 'DEBT_SETTLED' as TransactionEventType,
-  Claimed: 'CLAIMED' as TransactionEventType,
+  rwa_created: 'RWA_CREATED',
+  shares_bought: 'SHARES_BOUGHT',
+  fund_collected: 'FUND_COLLECTED',
+  debt_settled: 'DEBT_SETTLED',
+  claimed: 'CLAIMED',
 };
-
-/** Topic symbols to filter on (the contract emits these as the first topic). */
-const FACTORY_EVENT_TOPICS = Object.keys(EVENT_TYPE_MAP);
 
 /** Polling intervals (ms). */
 const ACTIVE_POLL_INTERVAL = 5_000;
 const IDLE_POLL_INTERVAL = 30_000;
 const IDLE_THRESHOLD = 3; // consecutive empty polls → idle
 
+/** Max events per getEvents request. */
+const EVENT_PAGE_LIMIT = 100;
+
 /**
- * EventsService — polls Soroban RPC for factory contract events.
+ * On first run (no stored cursor) look back this many ledgers so recently
+ * issued RWAs are picked up. Kept modest because the public testnet RPC is
+ * flaky on wide getEvents windows.
+ */
+const INITIAL_LOOKBACK = 2_000;
+
+/**
+ * Never start a scan further back than this (Soroban RPC only retains ~24h of
+ * events; a stale cursor beyond retention would error). On a large gap we skip
+ * forward and log the dropped range.
+ */
+const MAX_RETENTION_LOOKBACK = 17_000;
+
+/**
+ * EventsService — polls Soroban RPC for factory contract events and syncs them
+ * into the database (transaction history + collateral on-chain status).
  *
- * Uses cursor-based pagination with the EventListenerCursor table to persist
- * the last processed ledger across restarts. Adaptive backoff: polls every
- * 5s when events are found, slows to 30s after consecutive empty polls.
+ * Cursor-based: the last processed ledger is persisted in `EventListenerCursor`
+ * so processing resumes across restarts. Adaptive backoff: polls every 5s while
+ * events flow, slows to 30s after consecutive empty polls. Mirrors the polling
+ * approach in the ts-playground reference (no native contract-event webhook
+ * exists on Soroban — cursor polling is the in-SDK option).
  */
 @Injectable()
-export class EventsService implements OnModuleInit {
+export class EventsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EventsService.name);
   private running = false;
 
   constructor(
     private readonly rwaRepository: RwaRepository,
+    private readonly collateralRepository: CollateralRepository,
     private readonly blockchain: BlockchainService,
   ) {}
 
-  async onModuleInit() {
-    // Start the polling loop in the background (don't block module init).
+  onModuleInit() {
     this.running = true;
+    // Fire-and-forget the loop; don't block module init.
     this.pollLoop().catch((err) =>
       this.logger.error('Event polling loop crashed', err),
     );
-
     this.logger.log(
       `EventsService started → contract ${this.blockchain.factoryContractAddress}`,
     );
+  }
+
+  onModuleDestroy() {
+    this.running = false;
+    this.logger.log('EventsService stopped');
   }
 
   /** Main polling loop with adaptive backoff. */
@@ -72,191 +108,196 @@ export class EventsService implements OnModuleInit {
   /** Poll one batch of events. Returns true if any events were processed. */
   private async pollOnce(): Promise<boolean> {
     const contractId = this.blockchain.factoryContractAddress;
+    const latestLedger = await this.blockchain.getLatestLedger();
 
-    // Load or initialise cursor
+    // Resolve the start ledger from the persisted cursor (or an initial
+    // lookback), clamped to the RPC retention window.
     const cursor = await this.rwaRepository.getCursor(contractId);
-    const startLedger = cursor?.lastLedger
+    let startLedger = cursor?.lastLedger
       ? cursor.lastLedger + 1
-      : await this.blockchain.getLatestLedger();
+      : Math.max(1, latestLedger - INITIAL_LOOKBACK);
 
-    // Build topic filters — base64-encoded symbol ScVals
-    const topicFilters = FACTORY_EVENT_TOPICS.map((topic) => {
-      const symbolVal = xdr.ScVal.scvSymbol(topic);
-      const base64 = symbolVal.toXDR().toString('base64');
-      return [base64];
-    });
+    const minStart = Math.max(1, latestLedger - MAX_RETENTION_LOOKBACK);
+    if (startLedger < minStart) {
+      this.logger.warn(
+        `Cursor ledger ${startLedger} is beyond RPC retention; skipping to ${minStart} (dropped ${minStart - startLedger} ledgers)`,
+      );
+      startLedger = minStart;
+    }
 
-    const response = await this.blockchain.rpc.getEvents({
-      startLedger,
-      filters: [
-        {
-          type: 'contract',
-          contractIds: [contractId],
-          topics: topicFilters,
-        },
-      ],
-      limit: 50,
-    });
-
-    if (!response.events || response.events.length === 0) {
+    // Caught up — nothing new since the last processed ledger.
+    if (startLedger > latestLedger) {
       return false;
     }
 
+    // Filter by contract only; match event names in code. (Topic filters would
+    // need exact per-event wildcard counts since events have differing topic
+    // arity — matching in code is simpler and robust.)
+    const response = await this.blockchain.rpc.getEvents({
+      startLedger,
+      filters: [{ type: 'contract', contractIds: [contractId] }],
+      limit: EVENT_PAGE_LIMIT,
+    });
+
+    const events = response.events ?? [];
     let processed = 0;
-    let maxLedger = startLedger;
+    let maxLedger = startLedger - 1;
 
-    for (const event of response.events) {
-      // Deduplicate
-      const txHash = event.txHash ?? '';
-      const ledger = event.ledger;
-      if (await this.rwaRepository.eventExists(txHash, ledger)) {
-        continue;
-      }
+    for (const event of events) {
+      if (event.ledger > maxLedger) maxLedger = event.ledger;
 
-      // Parse the event
       const parsed = this.parseEvent(event);
       if (!parsed) continue;
 
+      const txHash = event.txHash ?? '';
+      const alreadyStored = await this.rwaRepository.eventExists({
+        txHash,
+        rwaId: parsed.rwaId,
+        eventType: parsed.eventType,
+      });
+      if (alreadyStored) continue;
+
       await this.rwaRepository.createEvent({
-        id: undefined as any, // let DB generate
         rwaId: parsed.rwaId,
         eventType: parsed.eventType,
         investorAddress: parsed.investorAddress ?? null,
         amount: parsed.amount ?? null,
         txHash,
-        ledger,
-      } as any);
+        ledger: event.ledger,
+      });
+
+      if (parsed.eventType === 'RWA_CREATED') {
+        await this.markCollateralOnChain(parsed.rwaId, parsed.tokenAddress);
+      }
 
       processed++;
-      if (ledger > maxLedger) maxLedger = ledger;
     }
 
-    // Update cursor
-    if (processed > 0 || maxLedger > startLedger) {
+    // Advance the cursor. If we drained the batch (fewer than the page limit),
+    // we've reached the RPC's latest ledger; otherwise resume from the last
+    // event's ledger and continue next cycle (dedup guards re-processing).
+    const drained = events.length < EVENT_PAGE_LIMIT;
+    const nextLedger = drained
+      ? response.latestLedger
+      : Math.max(maxLedger, startLedger);
+    if (nextLedger > (cursor?.lastLedger ?? 0)) {
       await this.rwaRepository.upsertCursor(
         contractId,
-        maxLedger,
-        response.events[response.events.length - 1]?.id,
+        nextLedger,
+        events.at(-1)?.id,
       );
     }
 
     if (processed > 0) {
       this.logger.debug(
-        `Processed ${processed} events (up to ledger ${maxLedger})`,
+        `Processed ${processed} event(s), cursor → ledger ${nextLedger}`,
       );
     }
 
     return processed > 0;
   }
 
-  /** Parse a Soroban event into a typed record. */
-  private parseEvent(event: any): {
+  /**
+   * Parse a factory Soroban event. The SDK returns decoded `xdr.ScVal`s in
+   * `event.topic` (array) and `event.value` (data). Layout per `events.rs`:
+   *   topic[0] = event name (symbol)          e.g. "rwa_created"
+   *   topic[1] = rwa_id (string)               — all events
+   *   topic[2] = shipper | investor (address)  — event-dependent
+   *   topic[3] = token (address)               — rwa_created only
+   *   value    = map/scalar of the amount fields (raise_amount, amount, …)
+   */
+  private parseEvent(event: { topic?: unknown[]; value?: unknown }): {
     rwaId: string;
     eventType: TransactionEventType;
     investorAddress?: string;
+    tokenAddress?: string;
     amount?: string;
   } | null {
     try {
-      // The first topic is the event name (symbol)
-      const topic = event.topic?.[0];
-      if (!topic) return null;
+      const topics = event.topic ?? [];
+      if (topics.length < 2) return null;
 
-      // Decode the topic from base64 XDR
-      const topicVal = xdr.ScVal.fromXDR(Buffer.from(topic, 'base64'));
-      const eventName = topicVal.sym()?.toString();
-      if (!eventName || !(eventName in EVENT_TYPE_MAP)) return null;
+      const name = String(scValToNative(topics[0] as never));
+      const eventType = EVENT_TYPE_MAP[name];
+      if (!eventType) return null;
 
-      const eventType = EVENT_TYPE_MAP[eventName];
-
-      // Parse the value field (event data)
-      const value = event.value;
-      if (!value) return null;
-
-      const valueVal = xdr.ScVal.fromXDR(Buffer.from(value, 'base64'));
-
-      // Different events have different value structures:
-      // RWACreated: { rwa_id: symbol/string }
-      // SharesBought: { rwa_id, investor: address, amount: i128 }
-      // FundCollected: { rwa_id }
-      // DebtSettled: { rwa_id }
-      // Claimed: { rwa_id, investor, amount }
-
-      // Try to extract rwa_id from the value (map or vec)
-      let rwaId = '';
-      let investorAddress: string | undefined;
-      let amount: string | undefined;
-
-      if (valueVal.switch() === xdr.ScValType.scvMap()) {
-        const map = valueVal.map();
-        if (!map) return null;
-        for (const entry of map) {
-          const key = entry.key().sym()?.toString();
-          const val = entry.val();
-          if (key === 'rwa_id' || key === 'rwaId' || key === 'id') {
-            rwaId = val.sym()?.toString() ?? this.scValToString(val);
-          } else if (key === 'investor' || key === 'investorAddress') {
-            investorAddress = val.address()?.toString();
-          } else if (key === 'amount' || key === 'principal_amount') {
-            amount = val.i128()?.toString() ?? this.scValToString(val);
-          }
-        }
-      } else if (valueVal.switch() === xdr.ScValType.scvVec()) {
-        const vec = valueVal.vec();
-        // First element is usually rwa_id
-        if (vec?.at(0)) {
-          rwaId = this.scValToString(vec.at(0)!);
-        }
-        if (vec?.at(1)) {
-          // Could be investor address or amount
-          const v1 = vec.at(1)!;
-          if (v1.switch() === xdr.ScValType.scvAddress()) {
-            investorAddress = v1.address()?.toString();
-          } else {
-            amount = this.scValToString(v1);
-          }
-        }
-      } else {
-        // Simple value — treat as rwa_id
-        rwaId = this.scValToString(valueVal);
-      }
-
+      const rwaId = String(scValToNative(topics[1] as never));
       if (!rwaId) return null;
 
-      return { rwaId, eventType, investorAddress, amount };
+      // topic[2] is the shipper (fund/settle) or investor (buy/claim).
+      const addr2 =
+        topics.length > 2
+          ? String(scValToNative(topics[2] as never))
+          : undefined;
+      const investorAddress =
+        eventType === 'SHARES_BOUGHT' || eventType === 'CLAIMED'
+          ? addr2
+          : undefined;
+
+      const tokenAddress =
+        eventType === 'RWA_CREATED' && topics.length > 3
+          ? String(scValToNative(topics[3] as never))
+          : undefined;
+
+      // Data is a map (multi-field events) or a scalar (single-field events).
+      let amount: string | undefined;
+      if (event.value != null) {
+        const data = scValToNative(event.value as never);
+        if (data != null && typeof data === 'object' && !Array.isArray(data)) {
+          const d = data as Record<string, unknown>;
+          const raw =
+            d.amount ?? d.raise_amount ?? d.principal ?? d.upfront ?? null;
+          if (raw != null) amount = String(raw);
+        } else if (
+          typeof data === 'bigint' ||
+          typeof data === 'number' ||
+          typeof data === 'string'
+        ) {
+          amount = String(data);
+        }
+      }
+
+      return { rwaId, eventType, investorAddress, tokenAddress, amount };
     } catch (error) {
       this.logger.error('Error parsing event', error);
       return null;
     }
   }
 
-  /** Convert an ScVal to a string representation for fallback parsing. */
-  private scValToString(val: xdr.ScVal): string {
-    switch (val.switch()) {
-      case xdr.ScValType.scvString():
-        return val.str().toString();
-      case xdr.ScValType.scvSymbol():
-        return val.sym().toString();
-      case xdr.ScValType.scvI128():
-        return val.i128().toString();
-      case xdr.ScValType.scvI64():
-        return val.i64().toString();
-      case xdr.ScValType.scvU32():
-        return val.u32().toString();
-      case xdr.ScValType.scvI32():
-        return val.i32().toString();
-      default:
-        return val.toXDR().toString('base64');
+  /**
+   * On `rwa_created`, promote the matching local collateral record to ON_CHAIN
+   * (and backfill the deployed token address). Idempotent.
+   */
+  private async markCollateralOnChain(
+    rwaId: string,
+    tokenAddress?: string,
+  ): Promise<void> {
+    try {
+      const collateral = await this.collateralRepository.findByRwaId(rwaId);
+      if (!collateral) {
+        this.logger.debug(
+          `rwa_created for ${rwaId} has no local collateral record (skipping status sync)`,
+        );
+        return;
+      }
+      if (
+        collateral.status === CollateralStatus.ON_CHAIN &&
+        (!tokenAddress || collateral.tokenAddress === tokenAddress)
+      ) {
+        return;
+      }
+      await this.collateralRepository.update(collateral.id, {
+        status: CollateralStatus.ON_CHAIN,
+        ...(tokenAddress ? { tokenAddress } : {}),
+      });
+      this.logger.log(`Collateral ${collateral.id} (${rwaId}) marked ON_CHAIN`);
+    } catch (error) {
+      this.logger.error(`Failed to sync collateral for ${rwaId}`, error);
     }
   }
 
   /** Sleep helper. */
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  /** Graceful shutdown — stop the polling loop. */
-  onModuleDestroy() {
-    this.running = false;
-    this.logger.log('EventsService stopped');
   }
 }

@@ -98,6 +98,25 @@ All prepare-endpoints require `req.user.walletAddress` (the shipper) and return 
 
 ---
 
-## 8. Known issue — `raiseAmount` scaling
+## 8. Event sync (`src/events`)
+
+There is no native webhook for Soroban contract events, so `EventsService` **polls** `rpc.getEvents` for the factory contract with adaptive backoff (5s active → 30s idle), persisting progress in the `EventListenerCursor` table so it resumes across restarts. This mirrors the `ts-playground` reference listener. It runs automatically on module init.
+
+**Reading factory events correctly** (see `contracts/factory/src/events.rs`):
+
+- `#[contractevent]` emits the struct name **lower-snake-cased** as the first topic — `RWACreated` → **`rwa_created`**. Filter/parse on the snake_case names, not the Rust type names.
+- Fields marked `#[topic]` are in **`event.topic[]`**, not the data value. For `rwa_created`: `topic = [name, rwa_id, shipper, token]`, `value = { raise_amount, interest_bps, upfront }`.
+- The SDK returns **decoded `xdr.ScVal`** in `event.topic`/`event.value` — use `scValToNative(...)` directly (do **not** base64-decode them).
+
+**What it syncs:**
+
+1. Inserts a `TransactionEvent` row (history), deduped by `(txHash, rwaId, eventType)`.
+2. On `rwa_created`, promotes the matching local `Collateral` to `status = ON_CHAIN` and backfills `tokenAddress`.
+
+> Note: the shipper's "My collateral" and the investor's "Available collateral" lists are driven by **`listRwas` (live on-chain read)**, *not* by these synced rows — so an offering appears there as soon as `create_rwa_token` lands, independent of the poller. The event sync adds transaction history and the `ON_CHAIN` status flag.
+
+---
+
+## 9. Known issue — `raiseAmount` scaling
 
 `raiseAmount` is currently passed **raw** to the contract (`BigInt(payload.raiseAmount)`), but the contract treats it as USDC base units (10^7 scale) — the DTO comment says "whole USDC". So `raiseAmount: 20` mints a 20-*stroop* raise (0.000002 USDC), not 20 USDC. Fixing requires scaling by `USDC_SCALE` consistently across the **mint permit signature**, `create_rwa_token`, and the `approve` amount (they must all agree). Not yet fixed — see `blockchain.service.ts` `USDC_SCALE`.

@@ -73,11 +73,13 @@ export class RwaRepository {
     }
   }
 
-  async eventExists(txHash: string, ledger: number): Promise<boolean> {
+  async eventExists(where: {
+    txHash: string;
+    rwaId: string;
+    eventType: TransactionEventType;
+  }): Promise<boolean> {
     try {
-      const count = await this.prisma.transactionEvent.count({
-        where: { txHash, ledger },
-      });
+      const count = await this.prisma.transactionEvent.count({ where });
       return count > 0;
     } catch (error) {
       this.logger.error('Error in eventExists', error);
