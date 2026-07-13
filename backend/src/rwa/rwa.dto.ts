@@ -39,6 +39,42 @@ export class SettleDebtDTO {
   principalAmount: string;
 }
 
+export class ApproveDTO {
+  @ApiProperty({
+    description:
+      'Amount to approve the factory to pull from the caller ' +
+      '(USDC base units, 10^7 scale). Required before buy_shares / settle_debt.',
+    example: '500000000',
+    required: true,
+  })
+  @IsNotEmpty()
+  @IsString()
+  amount: string;
+}
+
+export class BuySharesDTO {
+  @ApiProperty({
+    description: 'Amount of shares to buy (USDC base units, 10^7 scale)',
+    example: '500000000',
+    required: true,
+  })
+  @IsNotEmpty()
+  @IsString()
+  amount: string;
+}
+
+export class ClaimDTO {
+  @ApiProperty({
+    description:
+      'Amount of the investor allocation to claim (token base units, 10^7 scale)',
+    example: '500000000',
+    required: true,
+  })
+  @IsNotEmpty()
+  @IsString()
+  amount: string;
+}
+
 export class CreateRwaTokenDTO {
   @ApiProperty({
     description:

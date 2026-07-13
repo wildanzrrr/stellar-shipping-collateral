@@ -1,26 +1,40 @@
 "use client"
 
+import { useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useParams, useRouter } from "next/navigation"
 import Link from "next/link"
 import { useSession } from "next-auth/react"
+import { toast } from "sonner"
 import {
   ArrowLeft,
   Bank,
   Receipt,
   FileText,
   Coins,
+  TrendUp,
+  Wallet,
   DownloadSimple,
+  Warning,
 } from "@phosphor-icons/react/dist/ssr"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import { useWalletBalances } from "@/hooks/use-wallet"
 
 import {
   rwaApi,
   collateralApi,
   getTokenNameSymbol,
   type RwaStatus,
+  type CollateralRecord,
 } from "@/lib/api"
 
 import { useTxAction } from "./use-tx-action"
@@ -32,6 +46,15 @@ const STATUS_STYLES: Record<RwaStatus, string> = {
   Unknown: "bg-muted text-muted-foreground",
 }
 
+const DOC_ORDER = [
+  "SHIPPING_CONTRACT",
+  "BILL_OF_LADING",
+  "PROOF_OF_DELIVERY",
+  "COMMERCIAL_INVOICE",
+  "NOTICE_OF_ASSIGNMENT",
+] as const
+
+/** Format USDC/token base units (10^7 scale) to a human string. */
 function formatAmount(raw: string | number): string {
   const n = typeof raw === "string" ? Number(raw) : raw
   if (isNaN(n)) return String(raw)
@@ -47,6 +70,24 @@ function formatBps(bps: string | number): string {
   return `${(n / 100).toFixed(1)}%`
 }
 
+/** Convert human USDC (e.g. "20.5") to base units string ("205000000"). */
+function toBaseUnits(human: string): string {
+  const n = Number(human)
+  if (!isFinite(n) || n <= 0) throw new Error("Enter a valid amount greater than 0")
+  return BigInt(Math.round(n * 10_000_000)).toString()
+}
+
+/** Read a string/number field from a collateral record's collateralData. */
+function collateralField(
+  collateral: CollateralRecord | null | undefined,
+  key: string
+): string | undefined {
+  const v = collateral?.collateralData?.[key]
+  if (typeof v === "string") return v
+  if (typeof v === "number") return String(v)
+  return undefined
+}
+
 export default function CollateralDetailPage() {
   const params = useParams<{ rwaId: string }>()
   const router = useRouter()
@@ -55,6 +96,7 @@ export default function CollateralDetailPage() {
   const accessToken = session?.accessToken ?? ""
   const email = session?.user?.email ?? ""
   const walletId = session?.user?.walletId ?? null
+  const walletAddress = session?.user?.walletAddress ?? null
   const role = session?.user?.role
 
   const rwaId = params.rwaId
@@ -63,14 +105,20 @@ export default function CollateralDetailPage() {
     queryKey: ["rwa", rwaId],
     queryFn: () => rwaApi.getRwa(accessToken, rwaId),
     enabled: Boolean(accessToken) && Boolean(rwaId),
+    // Don't hammer the RPC when a token simply isn't on-chain yet.
+    retry: 1,
   })
 
-  // Find local collateral record — query the list endpoint and filter
+  // Local collateral record — the off-chain source of truth (works even when
+  // the token isn't on-chain yet).
   const collateralQuery = useQuery({
     queryKey: ["collateral-for-rwa", rwaId],
     queryFn: async () => {
       const list = await collateralApi.list(accessToken, 1, 100)
-      return list.items.find((c) => c.rwaId === rwaId) ?? null
+      const match = list.items.find((c) => c.rwaId === rwaId)
+      if (!match) return null
+      // Fetch full record (with documents) by id.
+      return collateralApi.getById(accessToken, match.id)
     },
     enabled: Boolean(accessToken) && Boolean(rwaId),
   })
@@ -80,40 +128,150 @@ export default function CollateralDetailPage() {
   const rwa = rwaQuery.data
   const collateral = collateralQuery.data
 
-  const tokenInfo = getTokenNameSymbol(collateral)
+  const [buyAmount, setBuyAmount] = useState("")
+  const [settleAmount, setSettleAmount] = useState("")
+  const [claimAmount, setClaimAmount] = useState("")
+
+  const tokenInfo =
+    getTokenNameSymbol(collateral) ??
+    (rwa
+      ? getTokenNameSymbol({
+          collateralData: rwa.collateral?.collateralData ?? null,
+        })
+      : null)
 
   const isShipper = role === "SHIPPING_COMPANY"
+  const isInvestor = !isShipper
+  const isOwner = Boolean(rwa && walletAddress && rwa.shipper === walletAddress)
+
+  // Investor's own on-chain holding (token base units), if any.
+  const myHolding =
+    (walletAddress && rwa?.investorHoldings?.[walletAddress]) || "0"
+  const hasHolding = Number(myHolding) > 0
+
+  const sharesTotalNum = rwa ? Number(rwa.sharesTotal) : 0
+  const sharesBoughtNum = rwa ? Number(rwa.sharesBought) : 0
+  const sharesAvailableNum = Math.max(0, sharesTotalNum - sharesBoughtNum)
   const fundedPct =
-    rwa?.sharesTotal && Number(rwa.sharesTotal) > 0
-      ? Math.min(
-          100,
-          Math.round((Number(rwa.sharesBought) / Number(rwa.sharesTotal)) * 100)
-        )
+    sharesTotalNum > 0
+      ? Math.min(100, Math.round((sharesBoughtNum / sharesTotalNum) * 100))
       : 0
+
+  // Investor USDC balance — used to validate buy amount before signing.
+  const balancesQuery = useWalletBalances({ address: walletAddress })
+  const balanceLoaded = !balancesQuery.isLoading && !balancesQuery.isError
+  const usdcBalance = Number(balancesQuery.data?.usdc ?? 0)
+
+  const buyNum = Number(buyAmount)
+  const buyIsPositive = !isNaN(buyNum) && buyNum > 0
+  // Balance is human USDC; shares available is in base units (10^7).
+  const buyExceedsBalance = balanceLoaded && buyIsPositive && buyNum > usdcBalance
+  const buyExceedsAvailable =
+    buyIsPositive && buyNum * 10_000_000 > sharesAvailableNum
+  const buyDisabledReason = buyExceedsBalance
+    ? `Insufficient USDC — your balance is ${usdcBalance.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC but you're trying to buy ${buyNum.toLocaleString(undefined, { maximumFractionDigits: 2 })}.`
+    : buyExceedsAvailable
+      ? `Only ${formatAmount(sharesAvailableNum)} shares are still available in this offering.`
+      : null
 
   function invalidate() {
     queryClient.invalidateQueries({ queryKey: ["rwa", rwaId] })
+    queryClient.invalidateQueries({ queryKey: ["collateral-for-rwa", rwaId] })
     queryClient.invalidateQueries({ queryKey: ["rwa-list"] })
   }
 
+  // ── Shipper actions ────────────────────────────────────────────────────
   async function handleCollectFund() {
-    const hash = await txAction.execute(
-      () => rwaApi.prepareCollectFund(accessToken, rwaId),
-      "collect_fund"
-    )
-    if (hash) invalidate()
+    try {
+      const hash = await txAction.execute(
+        () => rwaApi.prepareCollectFund(accessToken, rwaId),
+        "Collect funds"
+      )
+      if (hash) invalidate()
+    } catch {
+      /* error toast surfaced by useTxAction */
+    }
   }
 
   async function handleSettleDebt() {
-    const principalAmount = window.prompt(
-      "Enter principal amount to settle (in USDC base units):"
-    )
-    if (!principalAmount) return
-    const hash = await txAction.execute(
-      () => rwaApi.prepareSettleDebt(accessToken, rwaId, principalAmount),
-      "settle_debt"
-    )
-    if (hash) invalidate()
+    let amountRaw: string
+    try {
+      amountRaw = toBaseUnits(settleAmount)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Invalid amount")
+      return
+    }
+    try {
+      // settle_debt pulls USDC via transfer_from → approve the factory first.
+      await txAction.execute(
+        () => rwaApi.prepareApprove(accessToken, amountRaw),
+        "USDC approval"
+      )
+      const hash = await txAction.execute(
+        () => rwaApi.prepareSettleDebt(accessToken, rwaId, amountRaw),
+        "Settle debt"
+      )
+      if (hash) {
+        setSettleAmount("")
+        invalidate()
+      }
+    } catch {
+      /* error toast surfaced by useTxAction */
+    }
+  }
+
+  // ── Investor actions ───────────────────────────────────────────────────
+  async function handleBuyShares() {
+    let amountRaw: string
+    try {
+      amountRaw = toBaseUnits(buyAmount)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Invalid amount")
+      return
+    }
+    if (buyDisabledReason) {
+      toast.error(buyDisabledReason)
+      return
+    }
+    try {
+      // buy_shares pulls USDC via transfer_from → approve the factory first.
+      await txAction.execute(
+        () => rwaApi.prepareApprove(accessToken, amountRaw),
+        "USDC approval"
+      )
+      const hash = await txAction.execute(
+        () => rwaApi.prepareBuyShares(accessToken, rwaId, amountRaw),
+        "Buy shares"
+      )
+      if (hash) {
+        setBuyAmount("")
+        invalidate()
+      }
+    } catch {
+      /* error toast surfaced by useTxAction */
+    }
+  }
+
+  async function handleClaim() {
+    let amountRaw: string
+    try {
+      amountRaw = toBaseUnits(claimAmount)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Invalid amount")
+      return
+    }
+    try {
+      const hash = await txAction.execute(
+        () => rwaApi.prepareClaim(accessToken, rwaId, amountRaw),
+        "Claim"
+      )
+      if (hash) {
+        setClaimAmount("")
+        invalidate()
+      }
+    } catch {
+      /* error toast surfaced by useTxAction */
+    }
   }
 
   if (rwaQuery.isLoading || collateralQuery.isLoading) {
@@ -124,11 +282,12 @@ export default function CollateralDetailPage() {
     )
   }
 
-  if (rwaQuery.isError || !rwa) {
+  // Only a hard failure: neither on-chain nor a local record exists.
+  if (!rwa && !collateral) {
     return (
       <div className="flex flex-col gap-4 py-6 text-sm">
         <p className="text-muted-foreground">
-          Could not load RWA details. The contract may not have this token.
+          Could not find this token on-chain or in your records.
         </p>
         <Button
           variant="outline"
@@ -140,6 +299,12 @@ export default function CollateralDetailPage() {
       </div>
     )
   }
+
+  // Fall back to off-chain metadata when the token isn't on-chain yet.
+  const displayStatus: RwaStatus | string = rwa?.status ?? collateral?.status ?? "DRAFT"
+  const displayRaise = rwa?.raiseAmount ?? collateralField(collateral, "raiseAmount")
+  const displayInterestBps =
+    rwa?.interestBps ?? collateralField(collateral, "interestBps")
 
   return (
     <div className="flex flex-col gap-6 py-6">
@@ -164,55 +329,90 @@ export default function CollateralDetailPage() {
                 </Badge>
               </>
             ) : (
-              <h1 className="text-lg font-medium">{rwa.id}</h1>
+              <h1 className="font-mono text-lg font-medium">{rwaId}</h1>
             )}
             <Badge
-              className={STATUS_STYLES[rwa.status] ?? STATUS_STYLES.Unknown}
+              className={
+                STATUS_STYLES[displayStatus as RwaStatus] ??
+                STATUS_STYLES.Unknown
+              }
             >
-              {rwa.status}
+              {displayStatus}
             </Badge>
           </div>
-          {rwa.token && (
+          {rwa?.token && (
             <code className="font-mono text-xs text-muted-foreground">
               {rwa.token.slice(0, 12)}…
             </code>
           )}
         </div>
 
-        {/* On-chain details */}
+        {/* Off-chain-only banner */}
+        {!rwa && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+            <Warning size={16} className="mt-0.5 shrink-0" />
+            <span>
+              This token isn&apos;t on-chain yet — showing your local record.
+              On-chain statistics and actions appear once{" "}
+              <code className="font-mono">create_rwa_token</code> is confirmed.
+            </span>
+          </div>
+        )}
+
+        {/* Statistics */}
         <div className="grid grid-cols-2 gap-4 rounded-lg border p-4 sm:grid-cols-4">
           <DetailItem
             label="Raise Amount"
-            value={`$${formatAmount(rwa.raiseAmount)}`}
+            value={displayRaise ? `$${formatAmount(displayRaise)}` : "—"}
           />
           <DetailItem
             label="Interest Rate"
-            value={formatBps(rwa.interestBps)}
+            value={
+              displayInterestBps !== undefined
+                ? formatBps(displayInterestBps)
+                : "—"
+            }
           />
-          <DetailItem
-            label="Shares"
-            value={`${formatAmount(rwa.sharesBought)} / ${formatAmount(rwa.sharesTotal)}`}
-          />
-          <DetailItem label="Due Ledger" value={String(rwa.dueLedger)} />
+          {rwa ? (
+            <>
+              <DetailItem
+                label="Shares Sold"
+                value={`${formatAmount(rwa.sharesBought)} / ${formatAmount(rwa.sharesTotal)}`}
+              />
+              <DetailItem label="Investors" value={String(rwa.investors)} />
+            </>
+          ) : (
+            <>
+              <DetailItem
+                label="Due (days)"
+                value={collateralField(collateral, "dueDays") ?? "—"}
+              />
+              <DetailItem label="Status" value={String(displayStatus)} />
+            </>
+          )}
         </div>
 
-        {/* Funding progress */}
-        <div className="flex flex-col gap-1.5">
-          <div className="flex justify-between text-xs">
-            <span className="text-muted-foreground">Funding progress</span>
-            <span className="font-medium">{fundedPct}%</span>
+        {/* Funding progress (on-chain only) */}
+        {rwa && (
+          <div className="flex flex-col gap-1.5">
+            <div className="flex justify-between text-xs">
+              <span className="text-muted-foreground">
+                Funding progress · {formatAmount(sharesAvailableNum)} available
+              </span>
+              <span className="font-medium">{fundedPct}%</span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-primary transition-all"
+                style={{ width: `${fundedPct}%` }}
+              />
+            </div>
           </div>
-          <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full bg-primary transition-all"
-              style={{ width: `${fundedPct}%` }}
-            />
-          </div>
-        </div>
+        )}
 
-        {/* Pools (if available) */}
-        {rwa.principalPool !== undefined && (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        {/* Pools (on-chain only) */}
+        {rwa && (
+          <div className="grid grid-cols-2 gap-4 rounded-lg border p-4 sm:grid-cols-4">
             <DetailItem
               label="Principal Pool"
               value={`$${formatAmount(rwa.principalPool)}`}
@@ -225,49 +425,234 @@ export default function CollateralDetailPage() {
               label="Protocol Fee"
               value={formatBps(rwa.protocolFeeBps)}
             />
-            <DetailItem
-              label="Fee Pool"
-              value={`$${formatAmount(rwa.protocolFeePool)}`}
-            />
+            <DetailItem label="Due Ledger" value={String(rwa.dueLedger)} />
+          </div>
+        )}
+
+        {/* Investor: your position */}
+        {rwa && isInvestor && hasHolding && (
+          <div className="flex items-center justify-between rounded-lg border bg-muted/30 p-4">
+            <div className="flex items-center gap-2">
+              <Wallet size={18} className="text-primary" />
+              <div className="flex flex-col">
+                <span className="text-xs text-muted-foreground">
+                  Your holding
+                </span>
+                <span className="text-sm font-medium">
+                  {formatAmount(myHolding)} shares
+                </span>
+              </div>
+            </div>
+            <div className="flex flex-col items-end">
+              <span className="text-xs text-muted-foreground">
+                Est. payout at maturity
+              </span>
+              <span className="text-sm font-medium">
+                $
+                {formatAmount(
+                  (
+                    BigInt(myHolding) +
+                    (BigInt(myHolding) * BigInt(rwa.interestBps)) /
+                      BigInt(10000)
+                  ).toString()
+                )}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Shared action status line */}
+        {txAction.statusMsg && (
+          <div className="rounded-md bg-muted/50 px-3 py-1.5 text-xs">
+            {txAction.statusMsg}
           </div>
         )}
 
         {/* Shipper actions */}
-        {isShipper && (
-          <div className="flex flex-col gap-2 rounded-lg border p-4">
-            <h3 className="text-sm font-medium">Shipper actions</h3>
+        {rwa && isShipper && isOwner && (
+          <div className="flex flex-col gap-3 rounded-lg border p-4">
+            <div className="flex items-center gap-2">
+              <Bank size={16} className="text-muted-foreground" />
+              <h3 className="text-sm font-medium">Shipper actions</h3>
+            </div>
             <p className="text-xs text-muted-foreground">
               On-chain operations require DFNS passkey signing.
             </p>
-            {txAction.statusMsg && (
-              <div className="rounded-md bg-muted/50 px-3 py-1.5 text-xs">
-                {txAction.statusMsg}
-              </div>
-            )}
-            <div className="flex flex-wrap gap-2">
+
+            <div className="flex flex-col gap-2 rounded-md border p-3">
+              <span className="text-xs font-medium">Collect raised funds</span>
+              <p className="text-[11px] text-muted-foreground">
+                Withdraw USDC bought by investors so far.
+              </p>
               <Button
                 size="sm"
                 variant="outline"
-                disabled={txAction.isPending || rwa.status !== "Funded"}
+                className="w-fit"
+                disabled={txAction.isPending || Number(rwa.sharesBought) <= 0}
                 onClick={handleCollectFund}
               >
                 <Coins size={16} />
                 Collect Funds
               </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={txAction.isPending || rwa.status !== "Funded"}
-                onClick={handleSettleDebt}
-              >
-                <Bank size={16} />
-                Settle Debt
-              </Button>
+            </div>
+
+            <div className="flex flex-col gap-2 rounded-md border p-3">
+              <span className="text-xs font-medium">Settle debt</span>
+              <p className="text-[11px] text-muted-foreground">
+                Repay principal so investors can claim. Requires a USDC approval
+                first.
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  type="number"
+                  step="any"
+                  placeholder="Amount (USDC)"
+                  value={settleAmount}
+                  onChange={(e) => setSettleAmount(e.target.value)}
+                  disabled={txAction.isPending}
+                  className="h-8 max-w-45"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={txAction.isPending || !settleAmount}
+                  onClick={handleSettleDebt}
+                >
+                  <Bank size={16} />
+                  Settle Debt
+                </Button>
+              </div>
             </div>
           </div>
         )}
 
-        {/* Collateral record */}
+        {/* Investor actions */}
+        {rwa && isInvestor && (
+          <div className="flex flex-col gap-3 rounded-lg border p-4">
+            <div className="flex items-center gap-2">
+              <TrendUp size={16} className="text-muted-foreground" />
+              <h3 className="text-sm font-medium">Investor actions</h3>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              On-chain operations require DFNS passkey signing.
+            </p>
+
+            {/* Buy shares — only while the offering is Open */}
+            <div className="flex flex-col gap-2 rounded-md border p-3">
+              <span className="text-xs font-medium">Buy shares</span>
+              <p className="text-[11px] text-muted-foreground">
+                {rwa.status === "Open"
+                  ? `Purchase shares at 1:1 USDC. ${formatAmount(sharesAvailableNum)} available. Requires a USDC approval first.`
+                  : "This offering is no longer open for investment."}
+              </p>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  step="any"
+                  placeholder="Amount (USDC)"
+                  value={buyAmount}
+                  onChange={(e) => setBuyAmount(e.target.value)}
+                  disabled={txAction.isPending || rwa.status !== "Open"}
+                  className="h-8 max-w-45"
+                />
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      {/* span wrapper so the tooltip works on a disabled button */}
+                      <span className="inline-flex">
+                        <Button
+                          size="sm"
+                          disabled={
+                            txAction.isPending ||
+                            rwa.status !== "Open" ||
+                            !buyAmount ||
+                            buyExceedsBalance ||
+                            buyExceedsAvailable
+                          }
+                          onClick={handleBuyShares}
+                        >
+                          <Coins size={16} />
+                          Buy Shares
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    {buyDisabledReason && (
+                      <TooltipContent side="top">
+                        {buyDisabledReason}
+                      </TooltipContent>
+                    )}
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              {rwa.status === "Open" && (
+                <span
+                  className={[
+                    "text-[11px]",
+                    buyExceedsBalance
+                      ? "text-destructive"
+                      : "text-muted-foreground",
+                  ].join(" ")}
+                >
+                  {balancesQuery.isLoading
+                    ? "Checking your USDC balance…"
+                    : balancesQuery.isError
+                      ? "Could not fetch your USDC balance"
+                      : `Your USDC balance: ${usdcBalance.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC`}
+                </span>
+              )}
+            </div>
+
+            {/* Claim — only when Settled and the investor holds shares */}
+            <div className="flex flex-col gap-2 rounded-md border p-3">
+              <span className="text-xs font-medium">Claim principal + interest</span>
+              <p className="text-[11px] text-muted-foreground">
+                {rwa.status !== "Settled"
+                  ? "Available once the shipper has settled the debt."
+                  : hasHolding
+                    ? `You hold ${formatAmount(myHolding)} shares. Claim burns them and pays principal + interest.`
+                    : "You have no shares to claim in this offering."}
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  type="number"
+                  step="any"
+                  placeholder="Amount (shares)"
+                  value={claimAmount}
+                  onChange={(e) => setClaimAmount(e.target.value)}
+                  disabled={
+                    txAction.isPending || rwa.status !== "Settled" || !hasHolding
+                  }
+                  className="h-8 max-w-45"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={
+                    txAction.isPending || rwa.status !== "Settled" || !hasHolding
+                  }
+                  onClick={() => setClaimAmount(formatAmount(myHolding))}
+                >
+                  Max
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={
+                    txAction.isPending ||
+                    rwa.status !== "Settled" ||
+                    !hasHolding ||
+                    !claimAmount
+                  }
+                  onClick={handleClaim}
+                >
+                  <Wallet size={16} />
+                  Claim
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Collateral record + documents */}
         {collateral ? (
           <div className="flex flex-col gap-2 rounded-lg border p-4">
             <div className="flex items-center justify-between">
@@ -288,31 +673,22 @@ export default function CollateralDetailPage() {
                 </div>
               )}
             </div>
-            {collateral.collateralData && (
-              <div className="mt-2 rounded-md bg-muted/30 p-2 text-xs">
-                <pre className="whitespace-pre-wrap text-muted-foreground">
-                  {JSON.stringify(collateral.collateralData, null, 2)}
-                </pre>
-              </div>
+
+            {collateralField(collateral, "description") && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {collateralField(collateral, "description")}
+              </p>
             )}
-            {collateral.documents && collateral.documents.length > 0 && (
-              <div className="mt-2 flex flex-col gap-2">
-                <span className="text-xs font-medium text-muted-foreground">
-                  Documents ({collateral.documents.length})
-                </span>
-                {(
-                  [
-                    "SHIPPING_CONTRACT",
-                    "BILL_OF_LADING",
-                    "PROOF_OF_DELIVERY",
-                    "COMMERCIAL_INVOICE",
-                    "NOTICE_OF_ASSIGNMENT",
-                  ] as const
-                ).flatMap((docType) => {
+
+            <div className="mt-2 flex flex-col gap-2">
+              <span className="text-xs font-medium text-muted-foreground">
+                Documents ({collateral.documents?.length ?? 0})
+              </span>
+              {collateral.documents && collateral.documents.length > 0 ? (
+                DOC_ORDER.flatMap((docType) => {
                   const docs = collateral.documents!.filter(
                     (d) => d.documentType === docType
                   )
-                  if (docs.length === 0) return []
                   return docs.map((doc) => (
                     <div
                       key={doc.id}
@@ -340,7 +716,7 @@ export default function CollateralDetailPage() {
                             )
                             window.open(result.signedUrl, "_blank")
                           } catch {
-                            // error toast handled by caller
+                            toast.error("Could not open document")
                           }
                         }}
                       >
@@ -348,9 +724,13 @@ export default function CollateralDetailPage() {
                       </Button>
                     </div>
                   ))
-                })}
-              </div>
-            )}
+                })
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  No documents attached.
+                </p>
+              )}
+            </div>
           </div>
         ) : (
           isShipper && (
@@ -367,7 +747,7 @@ export default function CollateralDetailPage() {
         )}
 
         {/* Events */}
-        {rwa.events && rwa.events.length > 0 && (
+        {rwa && rwa.events && rwa.events.length > 0 && (
           <div className="flex flex-col gap-2 rounded-lg border p-4">
             <div className="flex items-center gap-2">
               <Receipt size={16} className="text-muted-foreground" />

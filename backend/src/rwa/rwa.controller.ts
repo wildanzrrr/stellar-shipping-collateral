@@ -15,7 +15,14 @@ import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { AuthenticatedRequest } from 'src/auth/jwt.types';
 import { RwaService } from './rwa.service';
-import { RwaQueryDTO, SettleDebtDTO, CreateRwaTokenDTO } from './rwa.dto';
+import {
+  RwaQueryDTO,
+  SettleDebtDTO,
+  CreateRwaTokenDTO,
+  ApproveDTO,
+  BuySharesDTO,
+  ClaimDTO,
+} from './rwa.dto';
 
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
@@ -111,6 +118,73 @@ export class RwaController {
     return this.rwaService.prepareApproveFactory(
       req.user.walletAddress,
       payload,
+    );
+  }
+
+  @Post('approve')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Prepare a USDC approve (caller → factory) transaction',
+    description:
+      'Generic approve required before buy_shares (investor) or settle_debt ' +
+      '(shipper). Returns the assembled XDR for DFNS signing by the caller.',
+  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Transaction prepared' })
+  prepareApprove(
+    @Req() req: AuthenticatedRequest,
+    @Body() payload: ApproveDTO,
+  ) {
+    if (!req.user.walletAddress) {
+      throw new BadRequestException('Wallet address required to approve');
+    }
+    return this.rwaService.prepareApprove(req.user.walletAddress, payload.amount);
+  }
+
+  @Post(':rwaId/buy-shares')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Prepare a buy_shares transaction (investor)',
+    description:
+      'Investor must first approve the factory to pull `amount` USDC. Returns ' +
+      'the assembled XDR for DFNS signing by the investor.',
+  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Transaction prepared' })
+  prepareBuyShares(
+    @Req() req: AuthenticatedRequest,
+    @Param('rwaId') rwaId: string,
+    @Body() payload: BuySharesDTO,
+  ) {
+    if (!req.user.walletAddress) {
+      throw new BadRequestException('Wallet address required to buy shares');
+    }
+    return this.rwaService.prepareBuyShares(
+      rwaId,
+      req.user.walletAddress,
+      payload.amount,
+    );
+  }
+
+  @Post(':rwaId/claim')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Prepare a claim transaction (investor)',
+    description:
+      'Signs an admin burn permit over the claimed allocation and assembles ' +
+      'the claim XDR for DFNS signing by the investor. Offering must be Settled.',
+  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Transaction prepared' })
+  prepareClaim(
+    @Req() req: AuthenticatedRequest,
+    @Param('rwaId') rwaId: string,
+    @Body() payload: ClaimDTO,
+  ) {
+    if (!req.user.walletAddress) {
+      throw new BadRequestException('Wallet address required to claim');
+    }
+    return this.rwaService.prepareClaim(
+      rwaId,
+      req.user.walletAddress,
+      payload.amount,
     );
   }
 

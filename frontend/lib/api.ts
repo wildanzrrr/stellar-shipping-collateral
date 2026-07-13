@@ -337,6 +337,8 @@ export interface RwaDetail extends RwaSummary {
   protocolFeePool: string
   sharesReserved: string
   investors: number
+  /** Per-investor holdings keyed by wallet address (token base units). */
+  investorHoldings: Record<string, string>
   events: TransactionEvent[]
 }
 
@@ -417,6 +419,25 @@ export const rwaApi = {
       method: "POST",
       headers: bearer(accessToken),
       body: JSON.stringify({ principalAmount }),
+    }),
+  /** Generic USDC approve (caller → factory). Precedes buy_shares / settle_debt. */
+  prepareApprove: (accessToken: string, amount: string) =>
+    req<PreparedTx>("/rwa/approve", {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify({ amount }),
+    }),
+  prepareBuyShares: (accessToken: string, rwaId: string, amount: string) =>
+    req<PreparedTx>(`/rwa/${encodeURIComponent(rwaId)}/buy-shares`, {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify({ amount }),
+    }),
+  prepareClaim: (accessToken: string, rwaId: string, amount: string) =>
+    req<PreparedTx>(`/rwa/${encodeURIComponent(rwaId)}/claim`, {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify({ amount }),
     }),
   submitTransaction: (accessToken: string, signedTxXdr: string) =>
     req<SubmitTxResult>("/rwa/submit", {

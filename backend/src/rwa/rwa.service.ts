@@ -63,14 +63,10 @@ export class RwaService {
     try {
       this.logger.debug('Getting RWA from factory', { rwaId });
 
+      // `get_rwa` is a read-only view — simulate it (no signAndSend, so it
+      // needs neither a funded admin account nor a submitted transaction).
       const tx = await this.blockchain.factory.get_rwa({ rwa_id: rwaId });
-      const result = await tx.signAndSend();
-
-      if (result.getTransactionResponse?.status !== 'SUCCESS') {
-        // Even simulation-only calls return the result
-      }
-
-      const rwa = tx.resultData()?.returnValue ?? (await tx.simulate()).result;
+      const rwa = (await tx.simulate()).result;
 
       // Parse the on-chain RWA struct
       const rwaData = this.parseRwaStruct(rwa);
@@ -386,6 +382,167 @@ export class RwaService {
   }
 
   /**
+   * Prepare a generic USDC `approve(caller → factory, amount)` transaction.
+   * Required before `buy_shares` (investor) and `settle_debt` (shipper), both of
+   * which pull USDC from the caller via `transfer_from`.
+   */
+  async prepareApprove(
+    ownerAddress: string,
+    amountRaw: string,
+  ): Promise<SuccessResponseDTO> {
+    try {
+      const amount = BigInt(amountRaw);
+      const factoryAddress = this.blockchain.factoryContractAddress;
+      const latestLedger = await this.blockchain.getLatestLedger();
+      const expirationLedger = latestLedger + LEDGERS_PER_DAY;
+
+      this.logger.debug('Preparing approve (factory as USDC spender)', {
+        ownerAddress,
+        amount: amount.toString(),
+        expirationLedger,
+      });
+
+      const txXdr = await this.blockchain.buildApproveTx({
+        ownerAddress,
+        spenderAddress: factoryAddress,
+        amount,
+        expirationLedger,
+      });
+
+      return {
+        success: true,
+        message: 'approve transaction prepared',
+        data: {
+          txXdr,
+          spender: factoryAddress,
+          amount: amount.toString(),
+          expirationLedger,
+        },
+        statusCode: HttpStatus.OK,
+      };
+    } catch (error) {
+      this.logger.error('Error in prepareApprove', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Prepare a `buy_shares` invocation for an investor. The investor must have
+   * already approved the factory to pull `amount` USDC (see `prepareApprove`).
+   * Returns the assembled transaction XDR for DFNS signing (investor as source).
+   */
+  async prepareBuyShares(
+    rwaId: string,
+    investorAddress: string,
+    amountRaw: string,
+  ): Promise<SuccessResponseDTO> {
+    try {
+      const amount = BigInt(amountRaw);
+      this.logger.debug('Preparing buy_shares', {
+        rwaId,
+        investorAddress,
+        amount: amount.toString(),
+      });
+
+      const investorFactory = this.blockchain.factoryForShipper(investorAddress);
+      const tx = await investorFactory.buy_shares({
+        rwa_id: rwaId,
+        investor: investorAddress,
+        amount: amount as any,
+      });
+
+      const assembledTx = await tx.simulate();
+      assertSimulationSucceeded(assembledTx, 'buy_shares');
+      const txXdr = assembledTx.built
+        ? this.blockchain.convertShipperAuthToSourceAccount(
+            assembledTx.built.toXDR('base64'),
+          )
+        : undefined;
+
+      return {
+        success: true,
+        message: 'buy_shares transaction prepared',
+        data: {
+          txXdr,
+          rwaId,
+          investor: investorAddress,
+          amount: amount.toString(),
+        },
+        statusCode: HttpStatus.OK,
+      };
+    } catch (error) {
+      this.logger.error('Error in prepareBuyShares', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Prepare a `claim` invocation for an investor. Reads the offering's token
+   * address on-chain, signs an admin burn permit over the claimed allocation,
+   * and assembles the transaction (investor as source). The offering must be
+   * `Settled` for this to simulate successfully.
+   */
+  async prepareClaim(
+    rwaId: string,
+    investorAddress: string,
+    amountRaw: string,
+  ): Promise<SuccessResponseDTO> {
+    try {
+      const amount = BigInt(amountRaw);
+      this.logger.debug('Preparing claim', {
+        rwaId,
+        investorAddress,
+        amount: amount.toString(),
+      });
+
+      // The burn permit is signed over the offering's SEP57 token contract.
+      const rwaTx = await this.blockchain.factory.get_rwa({ rwa_id: rwaId });
+      const rwa = (await rwaTx.simulate()).result as unknown as RWA;
+      const tokenAddress = rwa.token;
+
+      const { nonce, deadline, burnSignature } =
+        await this.blockchain.prepareClaimParams({
+          tokenAddress,
+          investorAddress,
+          amount,
+        });
+
+      const investorFactory = this.blockchain.factoryForShipper(investorAddress);
+      const tx = await investorFactory.claim({
+        rwa_id: rwaId,
+        investor: investorAddress,
+        amount: amount as any,
+        nonce,
+        deadline,
+        burn_signature: Buffer.from(burnSignature),
+      });
+
+      const assembledTx = await tx.simulate();
+      assertSimulationSucceeded(assembledTx, 'claim');
+      const txXdr = assembledTx.built
+        ? this.blockchain.convertShipperAuthToSourceAccount(
+            assembledTx.built.toXDR('base64'),
+          )
+        : undefined;
+
+      return {
+        success: true,
+        message: 'claim transaction prepared',
+        data: {
+          txXdr,
+          rwaId,
+          investor: investorAddress,
+          amount: amount.toString(),
+        },
+        statusCode: HttpStatus.OK,
+      };
+    } catch (error) {
+      this.logger.error('Error in prepareClaim', error);
+      throw error;
+    }
+  }
+
+  /**
    * Submit a signed Soroban transaction (after DFNS signing on the frontend).
    * Delegates to BlockchainService for XDR decode + RPC send.
    */
@@ -455,13 +612,20 @@ export class RwaService {
   // ─── helpers ──────────────────────────────────────────────────────────
 
   private parseRwaStruct(rwa: RWA): Record<string, unknown> {
-    // `investors` is an on-chain Map<address, shares>; the API exposes its size.
-    const investorCount =
-      rwa.investors instanceof Map
-        ? rwa.investors.size
-        : rwa.investors
-          ? Object.keys(rwa.investors).length
-          : 0;
+    // `investors` is an on-chain Map<address, shares>. Expose both the count
+    // and the per-address holdings so an investor can see (and claim) their
+    // own allocation from the details page.
+    const investorHoldings: Record<string, string> = {};
+    if (rwa.investors instanceof Map) {
+      for (const [addr, shares] of rwa.investors.entries()) {
+        investorHoldings[addr] = shares.toString();
+      }
+    } else if (rwa.investors) {
+      for (const [addr, shares] of Object.entries(rwa.investors)) {
+        investorHoldings[addr] = String(shares);
+      }
+    }
+    const investorCount = Object.keys(investorHoldings).length;
 
     return {
       id: rwa.id,
@@ -479,6 +643,7 @@ export class RwaService {
       sharesReserved: rwa.shares_reserved.toString(),
       dueLedger: Number(rwa.due_ledger),
       investors: investorCount,
+      investorHoldings,
     };
   }
 

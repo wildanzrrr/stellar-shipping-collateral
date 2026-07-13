@@ -768,4 +768,57 @@ export class BlockchainService implements OnModuleInit {
       mintSignature,
     };
   }
+
+  /**
+   * Sign a SEP57 burn permit with the admin keypair (action = 2).
+   * The message is signed over (action=2, account=investor, amount, contract=token)
+   * — the exact tuple the sep57 token's `burn` verifies on-chain in `claim`.
+   */
+  signBurnPermit(opts: {
+    contractAddress: string;
+    accountAddress: string;
+    amount: bigint;
+    nonce: bigint;
+    deadline: number;
+  }): Uint8Array {
+    const message = buildPermitMessage({
+      contractAddress: opts.contractAddress,
+      action: 2, // burn
+      accountAddress: opts.accountAddress,
+      amount: opts.amount,
+      nonce: opts.nonce,
+      deadline: opts.deadline,
+    });
+    return this.adminKeypair.sign(Buffer.from(message));
+  }
+
+  /**
+   * Generate the parameters needed for a `claim` call: a fresh nonce, a
+   * deadline, and the admin-signed burn permit over the investor's allocation.
+   *
+   * @param tokenAddress   the SEP57 token contract for the offering (`rwa.token`)
+   * @param investorAddress the investor whose tokens will be burned
+   * @param amount          the claim amount (in token base units)
+   */
+  async prepareClaimParams(opts: {
+    tokenAddress: string;
+    investorAddress: string;
+    amount: bigint;
+    deadlineHours?: number;
+  }): Promise<{ nonce: bigint; deadline: number; burnSignature: Uint8Array }> {
+    const latestLedger = await this.getLatestLedger();
+    const nonce = nextNonce();
+    const deadline =
+      latestLedger + (opts.deadlineHours ?? 1) * LEDGERS_PER_HOUR;
+
+    const burnSignature = this.signBurnPermit({
+      contractAddress: opts.tokenAddress,
+      accountAddress: opts.investorAddress,
+      amount: opts.amount,
+      nonce,
+      deadline,
+    });
+
+    return { nonce, deadline, burnSignature };
+  }
 }
