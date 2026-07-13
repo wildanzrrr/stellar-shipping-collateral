@@ -9,9 +9,25 @@ export const issueCollateralSchema = z.object({
   raiseAmount: z
     .string()
     .min(1, { message: "Raise amount is required" })
-    .refine((v) => !isNaN(Number(v)) && Number(v) > 0, {
-      message: "Raise amount must be greater than 0",
-    }),
+    .refine(
+      (v) => {
+        const n = Number(v)
+        return !isNaN(n) && n > 0
+      },
+      {
+        message: "Raise amount must be greater than 0",
+      }
+    )
+    .refine(
+      (v) => {
+        // USDC has 7 decimals; allow up to 7 decimal places
+        const parts = v.trim().split(/[.,]/)
+        return parts.length <= 2 && (parts[1]?.length ?? 0) <= 7
+      },
+      {
+        message: "Maximum 7 decimal places (USDC precision)",
+      }
+    ),
   interestBps: z
     .string()
     .min(1, { message: "Interest rate is required" })

@@ -109,8 +109,14 @@ export function useIssueCollateral({
       return submitResult
     }
 
+    // Convert human-readable USDC to raw base units (USDC has 7 decimals)
+    // e.g. "20" → 200_000_000, "2.5" → 25_000_000
+    const raiseAmountRaw = BigInt(
+      Math.round(Number(values.raiseAmount) * 10_000_000)
+    ).toString()
+
     const createTokenPayload = {
-      raiseAmount: values.raiseAmount,
+      raiseAmount: raiseAmountRaw,
       interestBps: values.interestBps,
       dueDays: Number(values.dueDays),
       name: values.name,
@@ -128,7 +134,18 @@ export function useIssueCollateral({
 
     setStep("awaiting-passkey")
     setStatusMsg("Approve the USDC allowance with your passkey…")
-    await signAndSubmit(approvePrepared.txXdr)
+    const approveResult = await signAndSubmit(approvePrepared.txXdr)
+
+    toast.success("USDC allowance approved", {
+      action: {
+        label: "View on Stellar Expert ↗",
+        onClick: () =>
+          window.open(
+            `https://stellar.expert/explorer/testnet/tx/${approveResult.hash}`,
+            "_blank"
+          ),
+      },
+    })
 
     // 2. Prepare create_rwa_token (now that the allowance is on-chain)
     setStep("preparing")
@@ -145,6 +162,19 @@ export function useIssueCollateral({
     const submitResult = await signAndSubmit(prepared.txXdr)
     setTxHash(submitResult.hash)
 
+    // Toast for the create_rwa_token on-chain success — link to the
+    // predicted token contract (or the tx) on Stellar Expert (testnet).
+    const tokenAddress = prepared.predictedTokenAddress
+    const expertUrl = tokenAddress
+      ? `https://stellar.expert/explorer/testnet/contract/${tokenAddress}`
+      : `https://stellar.expert/explorer/testnet/tx/${submitResult.hash}`
+    toast.success("RWA token created on-chain", {
+      action: {
+        label: "View on Stellar Expert ↗",
+        onClick: () => window.open(expertUrl, "_blank"),
+      },
+    })
+
     // 5. Create local collateral record
     setStep("creating-collateral")
     setStatusMsg("Creating collateral record…")
@@ -157,7 +187,7 @@ export function useIssueCollateral({
       collateralData: {
         name: values.name,
         symbol: values.symbol,
-        raiseAmount: values.raiseAmount,
+        raiseAmount: raiseAmountRaw,
         interestBps: values.interestBps,
         dueDays: Number(values.dueDays),
         description: values.description ?? "",
@@ -168,7 +198,16 @@ export function useIssueCollateral({
 
     setStep("done")
     setStatusMsg("")
-    toast.success("Collateral issued successfully!")
+    toast.success("Collateral issued successfully!", {
+      action: {
+        label: "View on Stellar Expert ↗",
+        onClick: () =>
+          window.open(
+            `https://stellar.expert/explorer/testnet/tx/${submitResult.hash}`,
+            "_blank"
+          ),
+      },
+    })
 
     return {
       collateralId: collateral.id,

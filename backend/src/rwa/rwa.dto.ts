@@ -52,8 +52,8 @@ export class CreateRwaTokenDTO {
 
   @ApiProperty({
     description:
-      'Raise amount in whole USDC (e.g. 10000 = 10K USDC @ 7 decimals)',
-    example: 10000,
+      'Raise amount in USDC base units (7 decimals). e.g. 500000000 = 50 USDC',
+    example: 500000000,
     required: true,
   })
   @IsNotEmpty()

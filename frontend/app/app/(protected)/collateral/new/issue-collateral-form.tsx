@@ -129,9 +129,14 @@ export function IssueCollateralForm() {
                 <FormItem>
                   <FormLabel>Raise Amount (USDC)</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g. 50000" type="number" {...field} />
+                    <Input
+                      placeholder="e.g. 50000"
+                      type="number"
+                      step="any"
+                      {...field}
+                    />
                   </FormControl>
-                  <FormDescription>In USDC units (7 decimals)</FormDescription>
+                  <FormDescription>Amount in USDC</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
