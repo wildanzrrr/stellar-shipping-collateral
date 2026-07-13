@@ -91,6 +91,29 @@ export class RwaController {
     );
   }
 
+  @Post('approve-factory')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Prepare USDC approve transaction (shipper → factory)',
+    description:
+      'Returns the assembled approve transaction XDR the shipper must sign via DFNS BEFORE create_rwa_token, so the factory can pull the upfront interest + protocol fee.',
+  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Transaction prepared' })
+  prepareApproveFactory(
+    @Req() req: AuthenticatedRequest,
+    @Body() payload: CreateRwaTokenDTO,
+  ) {
+    if (!req.user.walletAddress) {
+      throw new BadRequestException(
+        'Wallet address required to approve the factory',
+      );
+    }
+    return this.rwaService.prepareApproveFactory(
+      req.user.walletAddress,
+      payload,
+    );
+  }
+
   @Post(':rwaId/collect-fund')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

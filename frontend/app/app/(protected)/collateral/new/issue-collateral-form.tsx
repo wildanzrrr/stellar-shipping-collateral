@@ -26,10 +26,11 @@ import { DocumentUpload } from "./document-upload"
 
 const STEP_LABELS: Record<IssueStep, string> = {
   idle: "",
-  preparing: "1/4 Preparing transaction…",
-  "awaiting-passkey": "2/4 Sign with passkey…",
-  submitting: "3/4 Submitting to Stellar…",
-  "creating-collateral": "4/4 Creating collateral record…",
+  approving: "1/5 Approving USDC allowance…",
+  preparing: "2/5 Preparing transaction…",
+  "awaiting-passkey": "Sign with passkey…",
+  submitting: "Submitting to Stellar…",
+  "creating-collateral": "5/5 Creating collateral record…",
   done: "✓ Complete",
 }
 
@@ -51,7 +52,6 @@ export function IssueCollateralForm() {
   const form = useForm<IssueCollateralValues>({
     resolver: zodResolver(issueCollateralSchema),
     defaultValues: {
-      tokenId: "",
       name: "",
       symbol: "",
       raiseAmount: "",
@@ -85,19 +85,19 @@ export function IssueCollateralForm() {
           className="flex flex-col gap-4"
           onSubmit={form.handleSubmit(onSubmit)}
         >
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <FormField
               control={form.control}
-              name="tokenId"
+              name="name"
               render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Token ID</FormLabel>
+                <FormItem className="sm:col-span-2">
+                  <FormLabel>Token Name</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g. INV-2025-1023" {...field} />
+                    <Input
+                      placeholder="e.g. Maritime Invoice #1023"
+                      {...field}
+                    />
                   </FormControl>
-                  <FormDescription>
-                    Unique identifier for this receivable on-chain
-                  </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -120,20 +120,6 @@ export function IssueCollateralForm() {
               )}
             />
           </div>
-
-          <FormField
-            control={form.control}
-            name="name"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Token Name</FormLabel>
-                <FormControl>
-                  <Input placeholder="e.g. Maritime Invoice #1023" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <FormField

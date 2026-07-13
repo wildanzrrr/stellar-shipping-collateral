@@ -7,6 +7,10 @@ import {
   contract as stellarContract,
   TransactionBuilder,
   Transaction,
+  Contract,
+  Address,
+  nativeToScVal,
+  BASE_FEE,
 } from '@stellar/stellar-sdk';
 import {
   Client as IdentityVerifierClient,
@@ -331,6 +335,22 @@ export class BlockchainService implements OnModuleInit {
     return this.factoryContractId;
   }
 
+  /**
+   * Build a factory client scoped to a shipper's wallet address.
+   * Used for transactions where the shipper is the source account
+   * (e.g. create_rwa_token) so Soroban require_auth(shipper) passes.
+   * No signer is attached — the tx is signed externally via DFNS.
+   */
+  factoryForShipper(shipperAddress: string): FactoryClient {
+    return new FactoryClient({
+      contractId: this.factoryContractId,
+      networkPassphrase: NETWORK_PASSPHRASE,
+      rpcUrl: SOROBAN_RPC_URL,
+      publicKey: shipperAddress,
+      // No signer — tx will be signed by DFNS on the frontend
+    });
+  }
+
   /** The admin Keypair (used to sign permit messages). */
   get adminKey(): Keypair {
     return this.adminKeypair;
@@ -371,13 +391,137 @@ export class BlockchainService implements OnModuleInit {
       NETWORK_PASSPHRASE,
     ) as Transaction;
 
+    this.logger.debug('Submitting tx', {
+      source: tx.source,
+      fee: tx.fee,
+      operations: tx.operations.length,
+      hasSorobanData: !!tx.toXDR().includes('soroban'),
+      seqNum: tx.sequence,
+    });
+
     const sent = await this.rpcServer.sendTransaction(tx);
+
+    this.logger.debug('sendTransaction result', {
+      status: sent.status,
+      hash: sent.hash,
+      errorResultXdr: sent.errorResult?.toXDR('base64') ?? null,
+    });
+
+    // `sendTransaction` only tells us the tx was accepted into the mempool
+    // (PENDING); it never returns SUCCESS. Reject immediately on ERROR /
+    // TRY_AGAIN_LATER, otherwise poll `getTransaction` until the tx lands in a
+    // ledger so callers see the real on-chain outcome (and, for multi-step
+    // flows, so downstream simulations observe the applied state).
+    if (sent.status === 'ERROR') {
+      return {
+        hash: sent.hash,
+        status: 'FAILED',
+        errorResultXdr: sent.errorResult?.toXDR('base64') ?? null,
+      };
+    }
+
+    const final = await this.rpcServer.pollTransaction(sent.hash, {
+      attempts: 20,
+    });
+
+    this.logger.debug('pollTransaction result', {
+      status: final.status,
+      hash: sent.hash,
+    });
+
+    const errorResultXdr =
+      final.status === stellarRpc.Api.GetTransactionStatus.FAILED
+        ? (final.resultXdr?.toXDR('base64') ?? null)
+        : null;
 
     return {
       hash: sent.hash,
-      status: sent.status,
-      errorResultXdr: sent.errorResult?.toXDR('base64') ?? null,
+      status: final.status,
+      errorResultXdr,
     };
+  }
+
+  /** Read the USDC (payment token) contract address from the factory. */
+  async getUsdcAddress(): Promise<string> {
+    const tx = await this.factoryClient.usdc();
+    return tx.result;
+  }
+
+  /** Read the protocol fee (bps) configured on the factory. */
+  async getProtocolFeeBps(): Promise<bigint> {
+    const tx = await this.factoryClient.protocol_fee_bps();
+    return BigInt(tx.result);
+  }
+
+  /**
+   * Rewrite any `sorobanCredentialsAddress` auth entries to
+   * `sorobanCredentialsSourceAccount`.
+   *
+   * Our transactions always use the account that must authorize (the shipper)
+   * as the transaction source, and it is signed at the envelope level by DFNS.
+   * Source-account credentials are satisfied by that envelope signature, so we
+   * swap the simulation-produced address credentials — which would otherwise
+   * need their own separate Soroban auth signature — for source-account ones.
+   */
+  convertShipperAuthToSourceAccount(txXdr: string): string {
+    const env = xdr.TransactionEnvelope.fromXDR(txXdr, 'base64');
+    const tx = env.v1().tx();
+    for (const op of tx.operations()) {
+      if (op.body().switch().name !== 'invokeHostFunction') continue;
+      const auth = op.body().invokeHostFunctionOp().auth();
+      for (const entry of auth) {
+        if (entry.credentials().switch().name === 'sorobanCredentialsAddress') {
+          entry.credentials(
+            xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
+          );
+        }
+      }
+    }
+    return env.toXDR('base64');
+  }
+
+  /**
+   * Build an assembled USDC `approve(owner, spender, amount, expiration_ledger)`
+   * transaction with `owner` as the source account, ready for DFNS signing.
+   * Returns the transaction XDR (with source-account auth credentials).
+   */
+  async buildApproveTx(opts: {
+    ownerAddress: string;
+    spenderAddress: string;
+    amount: bigint;
+    expirationLedger: number;
+  }): Promise<string> {
+    const usdcAddress = await this.getUsdcAddress();
+    const account = await this.rpcServer.getAccount(opts.ownerAddress);
+    const tokenContract = new Contract(usdcAddress);
+
+    const raw = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: NETWORK_PASSPHRASE,
+    })
+      .addOperation(
+        tokenContract.call(
+          'approve',
+          nativeToScVal(Address.fromString(opts.ownerAddress), {
+            type: 'address',
+          }),
+          nativeToScVal(Address.fromString(opts.spenderAddress), {
+            type: 'address',
+          }),
+          nativeToScVal(opts.amount, { type: 'i128' }),
+          nativeToScVal(opts.expirationLedger, { type: 'u32' }),
+        ),
+      )
+      .setTimeout(300)
+      .build();
+
+    const sim = await this.rpcServer.simulateTransaction(raw);
+    if (stellarRpc.Api.isSimulationError(sim)) {
+      throw new Error(`approve simulation failed: ${sim.error}`);
+    }
+
+    const assembled = stellarRpc.assembleTransaction(raw, sim).build();
+    return this.convertShipperAuthToSourceAccount(assembled.toXDR());
   }
 
   /**

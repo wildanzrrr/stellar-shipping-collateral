@@ -255,20 +255,30 @@ export class WalletsService {
         }
       }
 
-      const messageBytes = Buffer.from(payload.message, 'utf8');
-      const tx = new TransactionBuilder(account, {
-        fee: BASE_FEE,
-        networkPassphrase: NETWORK_PASSPHRASE,
-      })
-        .addOperation(
-          Operation.manageData({
-            name: 'msg',
-            value: messageBytes,
-          }),
-        )
-        .setTimeout(180)
-        .build();
-      const transactionXdr = '0x' + tx.toEnvelope().toXDR('hex');
+      // If the message is a full transaction XDR (e.g. Soroban create_rwa_token),
+      // pass it directly to DFNS. Otherwise wrap short messages in a manageData op.
+      let transactionXdr: string;
+      const decodedXdr = Buffer.from(payload.message, 'base64');
+      if (decodedXdr.length > 64) {
+        // Full transaction XDR — send directly
+        transactionXdr = '0x' + decodedXdr.toString('hex');
+      } else {
+        // Short message — wrap in a manageData Stellar transaction
+        const messageBytes = Buffer.from(payload.message, 'utf8');
+        const tx = new TransactionBuilder(account, {
+          fee: BASE_FEE,
+          networkPassphrase: NETWORK_PASSPHRASE,
+        })
+          .addOperation(
+            Operation.manageData({
+              name: 'msg',
+              value: messageBytes,
+            }),
+          )
+          .setTimeout(180)
+          .build();
+        transactionXdr = '0x' + tx.toEnvelope().toXDR('hex');
+      }
 
       const delegated = this.delegatedClient(user.userAuthToken);
       const challenge: any = await delegated.keys.generateSignatureInit({
@@ -342,16 +352,28 @@ export class WalletsService {
         },
       );
 
+      this.logger.debug('DFNS signComplete result', JSON.stringify(result));
+
+      // DFNS returns signedData as 0x-prefixed hex — convert to base64 XDR
+      const signedHex = result?.signedData ?? result?.signedTransaction;
+      const signedXdr = signedHex
+        ? Buffer.from(signedHex.replace(/^0x/, ''), 'hex').toString('base64')
+        : null;
+
       // Update sign session
       await this.walletsRepository.updateSignSession(session.id, {
         status: 'completed',
-        signedXdr: result?.signedTransaction ?? null,
+        signedXdr,
       });
 
       return {
         success: true,
         message: 'Message signed successfully',
-        data: { ...result, transactionXdr: session.transactionXdr },
+        data: {
+          ...result,
+          signedTransaction: signedXdr,
+          transactionXdr: session.transactionXdr,
+        },
         statusCode: HttpStatus.OK,
       };
     } catch (error) {

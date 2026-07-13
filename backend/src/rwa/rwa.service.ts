@@ -3,8 +3,42 @@ import { RwaRepository } from './rwa.repository';
 import { CollateralRepository } from 'src/collateral/collateral.repository';
 import { SuccessResponseDTO } from 'src/utils/dto';
 import { SettleDebtDTO, CreateRwaTokenDTO } from './rwa.dto';
-import { BlockchainService } from 'src/blockchain/blockchain.service';
+import {
+  BlockchainService,
+  LEDGERS_PER_DAY,
+} from 'src/blockchain/blockchain.service';
 import { RWA, RWAStatus } from 'src/packages/factory/dist/index.js';
+import { generateCustomId } from 'src/utils/utils';
+import { rpc } from '@stellar/stellar-sdk';
+import type { contract } from '@stellar/stellar-sdk';
+
+/**
+ * Guard against silent Soroban simulation failures.
+ *
+ * `AssembledTransaction.simulate()` does NOT throw when simulation fails — it
+ * leaves `.built` as the raw, un-assembled transaction (base fee only, no
+ * Soroban footprint/resource fee). If we sign and submit that, the network
+ * rejects it as `txMALFORMED`, hiding the real contract-level error. This
+ * surfaces the actual simulation error (e.g. "not enough allowance to spend")
+ * so the caller sees a meaningful message.
+ */
+function assertSimulationSucceeded(
+  assembled: contract.AssembledTransaction<unknown>,
+  method: string,
+): void {
+  const sim = assembled.simulation;
+  if (!sim) {
+    throw new Error(`${method} was not simulated`);
+  }
+  if (rpc.Api.isSimulationError(sim)) {
+    throw new Error(`${method} simulation failed: ${sim.error}`);
+  }
+  if (rpc.Api.isSimulationRestore(sim)) {
+    throw new Error(
+      `${method} requires restoring expired contract state before it can run`,
+    );
+  }
+}
 
 /**
  * RwaService — bridges the on-chain factory contract with off-chain collateral
@@ -145,9 +179,11 @@ export class RwaService {
     payload: CreateRwaTokenDTO,
   ): Promise<SuccessResponseDTO> {
     try {
+      // Auto-generate tokenId if not provided by the client
+      const tokenId = payload.tokenId ?? generateCustomId('tkn');
       this.logger.debug('Preparing create_rwa_token', {
         shipperAddress,
-        tokenId: payload.tokenId,
+        tokenId,
       });
 
       const raiseAmount = BigInt(payload.raiseAmount);
@@ -158,10 +194,12 @@ export class RwaService {
         dueDays: payload.dueDays,
       });
 
-      // Assemble the create_rwa_token transaction
-      const tx = await this.blockchain.factory.create_rwa_token({
+      // Assemble the create_rwa_token transaction with shipper as source
+      // (Soroban require_auth(shipper) needs shipper as the tx source account)
+      const shipperFactory = this.blockchain.factoryForShipper(shipperAddress);
+      const tx = await shipperFactory.create_rwa_token({
         shipper: shipperAddress,
-        token_id: payload.tokenId,
+        token_id: tokenId,
         raise_amount: raiseAmount as any,
         interest_bps: interestBps as any,
         due_ledger: params.dueLedger,
@@ -174,14 +212,28 @@ export class RwaService {
       });
 
       const assembledTx = await tx.simulate();
-      const txXdr = assembledTx.built?.toXDR('base64');
+      // Fail loudly on simulation errors instead of submitting a malformed tx.
+      assertSimulationSucceeded(assembledTx, 'create_rwa_token');
+      this.logger.debug('create_rwa_token simulation', {
+        hasBuilt: !!assembledTx.built,
+        fee: assembledTx.built?.fee,
+      });
+
+      // The simulation produces address credentials for the shipper's
+      // require_auth. Since the shipper is the tx source (signed at the
+      // envelope level by DFNS), rewrite them to source-account credentials.
+      const txXdr = assembledTx.built
+        ? this.blockchain.convertShipperAuthToSourceAccount(
+            assembledTx.built.toXDR('base64'),
+          )
+        : undefined;
 
       return {
         success: true,
         message: 'create_rwa_token transaction prepared',
         data: {
           txXdr,
-          tokenId: payload.tokenId,
+          tokenId,
           predictedTokenAddress: params.predictedTokenAddress,
           raiseAmount: raiseAmount.toString(),
           interestBps: interestBps.toString(),
@@ -194,6 +246,64 @@ export class RwaService {
       };
     } catch (error) {
       this.logger.error('Error in prepareCreateRwaToken', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Prepare the USDC `approve` the shipper must sign BEFORE `create_rwa_token`.
+   *
+   * `create_rwa_token` pulls the upfront interest + protocol fee from the
+   * shipper via `transfer_from`, which requires the shipper to have approved
+   * the factory as a spender. Soroban permits only one host-function op per
+   * transaction, so this must be a separate transaction signed first.
+   *
+   * The approved amount mirrors the contract exactly:
+   *   upfront = raise_amount * (interest_bps + protocol_fee_bps) / 10_000
+   * computed from the SAME raise amount passed to `create_rwa_token` so the
+   * allowance always covers the pull.
+   */
+  async prepareApproveFactory(
+    shipperAddress: string,
+    payload: CreateRwaTokenDTO,
+  ): Promise<SuccessResponseDTO> {
+    try {
+      const raiseAmount = BigInt(payload.raiseAmount);
+      const interestBps = BigInt(payload.interestBps);
+      const protoBps = await this.blockchain.getProtocolFeeBps();
+
+      const upfront = (raiseAmount * (interestBps + protoBps)) / 10_000n;
+
+      const factoryAddress = this.blockchain.factoryContractAddress;
+      const latestLedger = await this.blockchain.getLatestLedger();
+      const expirationLedger = latestLedger + LEDGERS_PER_DAY;
+
+      this.logger.debug('Preparing approve (factory as USDC spender)', {
+        shipperAddress,
+        upfront: upfront.toString(),
+        expirationLedger,
+      });
+
+      const txXdr = await this.blockchain.buildApproveTx({
+        ownerAddress: shipperAddress,
+        spenderAddress: factoryAddress,
+        amount: upfront,
+        expirationLedger,
+      });
+
+      return {
+        success: true,
+        message: 'approve transaction prepared',
+        data: {
+          txXdr,
+          spender: factoryAddress,
+          amount: upfront.toString(),
+          expirationLedger,
+        },
+        statusCode: HttpStatus.OK,
+      };
+    } catch (error) {
+      this.logger.error('Error in prepareApproveFactory', error);
       throw error;
     }
   }
@@ -215,6 +325,7 @@ export class RwaService {
       });
 
       const assembledTx = await tx.simulate();
+      assertSimulationSucceeded(assembledTx, 'collect_fund');
       const txXdr = assembledTx.built?.toXDR('base64');
 
       return {
@@ -254,6 +365,7 @@ export class RwaService {
       });
 
       const assembledTx = await tx.simulate();
+      assertSimulationSucceeded(assembledTx, 'settle_debt');
       const txXdr = assembledTx.built?.toXDR('base64');
 
       return {

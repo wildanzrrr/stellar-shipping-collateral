@@ -41,13 +41,14 @@ export class SettleDebtDTO {
 
 export class CreateRwaTokenDTO {
   @ApiProperty({
-    description: 'On-chain RWA token id / offering id',
-    example: 'INV-1023',
-    required: true,
+    description:
+      'On-chain RWA token id / offering id (auto-generated if omitted)',
+    example: 'tkn-abc123',
+    required: false,
   })
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  tokenId: string;
+  tokenId?: string;
 
   @ApiProperty({
     description:
@@ -58,6 +59,7 @@ export class CreateRwaTokenDTO {
   @IsNotEmpty()
   @IsNumber()
   @Min(1)
+  @Type(() => Number)
   raiseAmount: number;
 
   @ApiProperty({
@@ -68,6 +70,7 @@ export class CreateRwaTokenDTO {
   @IsNotEmpty()
   @IsNumber()
   @Min(1)
+  @Type(() => Number)
   interestBps: number;
 
   @ApiProperty({
@@ -78,6 +81,7 @@ export class CreateRwaTokenDTO {
   @IsNotEmpty()
   @IsNumber()
   @Min(1)
+  @Type(() => Number)
   dueDays: number;
 
   @ApiProperty({

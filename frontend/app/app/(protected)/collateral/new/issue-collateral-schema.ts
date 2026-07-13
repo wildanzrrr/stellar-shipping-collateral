@@ -1,7 +1,6 @@
 import { z } from "zod"
 
 export const issueCollateralSchema = z.object({
-  tokenId: z.string().min(1, { message: "Token ID is required" }),
   name: z.string().min(1, { message: "Token name is required" }),
   symbol: z
     .string()

@@ -18,7 +18,8 @@
     "prisma:generate": "npx prisma generate",
     "prisma:studio": "npx prisma studio",
     "prisma:migrate": "npx prisma migrate dev",
-    "prisma:seed": "npx prisma db seed"
+    "prisma:seed": "npx prisma db seed",
+    "prisma:export": "tsx prisma/export.ts"
   },
   "dependencies": {
     "@dfns/sdk": "^0.8.23",

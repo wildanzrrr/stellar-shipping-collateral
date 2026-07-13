@@ -372,6 +372,12 @@ export const rwaApi = {
     req<{ items: TransactionEvent[] }>(`/rwa/events`, {
       headers: bearer(accessToken),
     }),
+  prepareApproveFactory: (accessToken: string, body: CreateRwaTokenPayload) =>
+    req<PreparedTx>("/rwa/approve-factory", {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify(body),
+    }),
   prepareCreateRwaToken: (accessToken: string, body: CreateRwaTokenPayload) =>
     req<PreparedTx>("/rwa/create-token", {
       method: "POST",
@@ -434,7 +440,6 @@ export interface CollateralDocument {
 }
 
 export interface CreateRwaTokenPayload {
-  tokenId: string
   raiseAmount: string
   interestBps: string
   dueDays: number
