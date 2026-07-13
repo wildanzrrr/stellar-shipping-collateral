@@ -8,7 +8,7 @@ import { IssueCollateralForm } from "./issue-collateral-form"
 export default function NewCollateralPage() {
   return (
     <div className="flex flex-col gap-6 py-6">
-      <div className="flex w-full max-w-2xl flex-col gap-4 text-sm">
+      <div className="flex w-full flex-col gap-4 text-sm">
         <div className="flex items-center gap-3">
           <Link
             href="/app/collateral"

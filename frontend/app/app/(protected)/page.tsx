@@ -34,12 +34,12 @@ export default function AppDashboard() {
         {role && (
           <div className="flex flex-col gap-2 border-t pt-4">
             <h2 className="text-sm font-medium">
-              {role === "SHIPPING_COMPANY"
-                ? "My collateral"
-                : "Available offerings"}
+              {role === "SHIPPING_COMPANY" ? "My collateral" : "My investment"}
             </h2>
             <RwaList
-              variant={role === "SHIPPING_COMPANY" ? "shipper" : "investor"}
+              variant={
+                role === "SHIPPING_COMPANY" ? "shipper" : "my-investment"
+              }
               kybStatus={kybStatus}
             />
           </div>

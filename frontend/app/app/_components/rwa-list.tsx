@@ -45,8 +45,12 @@ function formatBps(bps: string | number): string {
 }
 
 interface RwaListProps {
-  /** Shipping company sees their own RWAs; investor sees all open offerings. */
-  variant: "shipper" | "investor"
+  /**
+   * - `shipper`: the shipping company's own issued RWAs (+ "Issue collateral")
+   * - `investor`: all open offerings (the "Available collateral" page)
+   * - `my-investment`: only offerings the investor holds shares in
+   */
+  variant: "shipper" | "investor" | "my-investment"
   /** Shipper only — disables "Issue collateral" until KYB is completed. */
   kybStatus?: KybStatus
 }
@@ -56,6 +60,7 @@ interface RwaListProps {
  * - Shipper variant: shows "Issue collateral" button + their RWAs
  *   (button is disabled until KYB status is COMPLETED)
  * - Investor variant: shows all open RWAs as investable offerings
+ * - My-investment variant: shows only offerings the investor already holds
  */
 export function RwaList({ variant, kybStatus }: RwaListProps) {
   const { data: session } = useSession()
@@ -63,7 +68,8 @@ export function RwaList({ variant, kybStatus }: RwaListProps) {
 
   const query = useQuery({
     queryKey: ["rwa-list", variant],
-    queryFn: () => rwaApi.list(accessToken),
+    queryFn: () =>
+      rwaApi.list(accessToken, 1, 20, { mine: variant === "my-investment" }),
     enabled: Boolean(accessToken),
   })
 
@@ -87,12 +93,16 @@ export function RwaList({ variant, kybStatus }: RwaListProps) {
           <p className="font-medium">
             {variant === "shipper"
               ? "No collateral yet"
-              : "No offerings available"}
+              : variant === "my-investment"
+                ? "No investments yet"
+                : "No offerings available"}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
             {variant === "shipper"
               ? "Tokenize your first maritime receivable to get started."
-              : "When shipping companies tokenize receivables, they'll appear here."}
+              : variant === "my-investment"
+                ? "You haven't bought shares in any offering yet."
+                : "When shipping companies tokenize receivables, they'll appear here."}
           </p>
         </div>
         {variant === "shipper" &&
@@ -116,6 +126,11 @@ export function RwaList({ variant, kybStatus }: RwaListProps) {
               <TooltipContent>Complete KYB verification first</TooltipContent>
             </Tooltip>
           ))}
+        {variant === "my-investment" && (
+          <Button asChild size="sm" variant="outline">
+            <Link href="/app/collateral">Browse available collateral</Link>
+          </Button>
+        )}
       </div>
     )
   }
@@ -189,9 +204,16 @@ function RwaCard({ rwa }: { rwa: RwaSummary }) {
             </code>
           )}
         </div>
-        <Badge className={STATUS_STYLES[rwa.status] ?? STATUS_STYLES.Unknown}>
-          {rwa.status}
-        </Badge>
+        <div className="flex items-center gap-2">
+          {rwa.myShares && Number(rwa.myShares) > 0 && (
+            <Badge variant="secondary" className="text-xs">
+              You: {formatAmount(rwa.myShares)}
+            </Badge>
+          )}
+          <Badge className={STATUS_STYLES[rwa.status] ?? STATUS_STYLES.Unknown}>
+            {rwa.status}
+          </Badge>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">

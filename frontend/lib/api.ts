@@ -328,6 +328,8 @@ export interface RwaSummary {
   sharesTotal: string
   dueLedger: number
   collateral: CollateralRecord | null
+  /** Investor's own holding (token base units) — only set for the `mine` list. */
+  myShares?: string
 }
 
 export interface RwaDetail extends RwaSummary {
@@ -375,9 +377,14 @@ export interface SubmitTxResult {
 }
 
 export const rwaApi = {
-  list: (accessToken: string, page = 1, limit = 20) =>
+  list: (
+    accessToken: string,
+    page = 1,
+    limit = 20,
+    opts?: { mine?: boolean }
+  ) =>
     req<{ items: RwaSummary[]; total: number; page: number; limit: number }>(
-      `/rwa?page=${page}&limit=${limit}`,
+      `/rwa?page=${page}&limit=${limit}${opts?.mine ? "&mine=true" : ""}`,
       { headers: bearer(accessToken) }
     ),
   getRwa: (accessToken: string, rwaId: string) =>

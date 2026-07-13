@@ -36,13 +36,17 @@ export class RwaController {
   })
   @ApiResponse({ status: HttpStatus.OK, description: 'RWA list' })
   list(@Req() req: AuthenticatedRequest, @Query() query: RwaQueryDTO) {
-    // If SHIPPING_COMPANY, filter by their wallet address
-    const shipperAddress =
-      req.user.role === 'SHIPPING_COMPANY' ? req.user.walletAddress : undefined;
+    const isShipper = req.user.role === 'SHIPPING_COMPANY';
+    // Shipping companies see their own issued RWAs; an investor with `mine=true`
+    // (the "My investment" view) sees only offerings they hold shares in.
+    const shipperAddress = isShipper ? req.user.walletAddress : undefined;
+    const investorAddress =
+      !isShipper && query.mine ? req.user.walletAddress : undefined;
     return this.rwaService.listRwas(
       shipperAddress,
       query.page ?? 1,
       query.limit ?? 20,
+      investorAddress,
     );
   }
 

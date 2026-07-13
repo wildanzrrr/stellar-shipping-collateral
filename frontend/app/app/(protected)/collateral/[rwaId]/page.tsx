@@ -16,6 +16,7 @@ import {
   Wallet,
   DownloadSimple,
   Warning,
+  ArrowSquareOut,
 } from "@phosphor-icons/react/dist/ssr"
 
 import { Button } from "@/components/ui/button"
@@ -107,10 +108,17 @@ export default function CollateralDetailPage() {
     enabled: Boolean(accessToken) && Boolean(rwaId),
     // Don't hammer the RPC when a token simply isn't on-chain yet.
     retry: 1,
+    // Keep stats + events fresh automatically (the events poller writes new
+    // rows within ~5s of a tx) so users never need to refresh manually — but
+    // stop polling a token that isn't on-chain (get_rwa keeps failing).
+    refetchInterval: (query) =>
+      query.state.status === "error" ? false : 10_000,
   })
 
-  // Local collateral record — the off-chain source of truth (works even when
-  // the token isn't on-chain yet).
+  // Local collateral record fallback — only needed when the token isn't
+  // on-chain yet (getRwa fails). For on-chain tokens the collateral (with
+  // documents) is joined into the getRwa response, which — unlike the
+  // user-scoped list — is visible to investors too.
   const collateralQuery = useQuery({
     queryKey: ["collateral-for-rwa", rwaId],
     queryFn: async () => {
@@ -120,25 +128,22 @@ export default function CollateralDetailPage() {
       // Fetch full record (with documents) by id.
       return collateralApi.getById(accessToken, match.id)
     },
-    enabled: Boolean(accessToken) && Boolean(rwaId),
+    enabled: Boolean(accessToken) && Boolean(rwaId) && rwaQuery.isError,
   })
 
   const txAction = useTxAction({ accessToken, email, walletId })
 
   const rwa = rwaQuery.data
-  const collateral = collateralQuery.data
+  // Prefer the collateral joined into the on-chain response (visible to any
+  // viewer incl. investors); fall back to the owner's local record for a
+  // not-yet-on-chain draft.
+  const collateral = rwa?.collateral ?? collateralQuery.data ?? null
 
   const [buyAmount, setBuyAmount] = useState("")
   const [settleAmount, setSettleAmount] = useState("")
   const [claimAmount, setClaimAmount] = useState("")
 
-  const tokenInfo =
-    getTokenNameSymbol(collateral) ??
-    (rwa
-      ? getTokenNameSymbol({
-          collateralData: rwa.collateral?.collateralData ?? null,
-        })
-      : null)
+  const tokenInfo = getTokenNameSymbol(collateral)
 
   const isShipper = role === "SHIPPING_COMPANY"
   const isInvestor = !isShipper
@@ -308,7 +313,7 @@ export default function CollateralDetailPage() {
 
   return (
     <div className="flex flex-col gap-6 py-6">
-      <div className="flex w-full max-w-2xl flex-col gap-4 text-sm">
+      <div className="flex w-full flex-col gap-4 text-sm">
         {/* Back link */}
         <Link
           href="/app/collateral"
@@ -341,9 +346,16 @@ export default function CollateralDetailPage() {
             </Badge>
           </div>
           {rwa?.token && (
-            <code className="font-mono text-xs text-muted-foreground">
+            <a
+              href={`https://stellar.expert/explorer/testnet/contract/${rwa.token}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={rwa.token}
+              className="flex items-center gap-1 font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
+            >
               {rwa.token.slice(0, 12)}…
-            </code>
+              <ArrowSquareOut size={12} />
+            </a>
           )}
         </div>
 
@@ -770,6 +782,18 @@ export default function CollateralDetailPage() {
                   <div className="flex items-center gap-2 text-muted-foreground">
                     {ev.amount && <span>{formatAmount(ev.amount)} USDC</span>}
                     <span>L{ev.ledger}</span>
+                    {ev.txHash && (
+                      <a
+                        href={`https://stellar.expert/explorer/testnet/tx/${ev.txHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={`View tx ${ev.txHash} on Stellar Expert`}
+                        className="flex items-center gap-1 font-mono text-primary hover:underline"
+                      >
+                        {ev.txHash.slice(0, 6)}…
+                        <ArrowSquareOut size={12} />
+                      </a>
+                    )}
                   </div>
                 </div>
               ))}

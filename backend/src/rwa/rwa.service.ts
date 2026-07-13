@@ -91,23 +91,38 @@ export class RwaService {
     }
   }
 
-  /** List all RWAs from the factory, optionally filtered by shipper. */
+  /**
+   * List all RWAs from the factory, optionally filtered by shipper (the
+   * shipping company's own offerings) or by investor (only offerings the
+   * investor holds shares in — the "My investment" view).
+   */
   async listRwas(
     shipperAddress?: string,
     page = 1,
     limit = 20,
+    investorAddress?: string,
   ): Promise<SuccessResponseDTO> {
     try {
-      this.logger.debug('Listing RWAs', { shipperAddress, page, limit });
+      this.logger.debug('Listing RWAs', {
+        shipperAddress,
+        investorAddress,
+        page,
+        limit,
+      });
 
       const tx = await this.blockchain.factory.list_rwas();
       const simulated = await tx.simulate();
       const rwas = simulated.result as unknown as RWA[];
 
-      // Filter by shipper if provided
-      const filtered = shipperAddress
+      // Filter by shipper (their issued RWAs) or investor (their holdings).
+      let filtered = shipperAddress
         ? rwas.filter((r) => r.shipper === shipperAddress)
         : rwas;
+      if (investorAddress) {
+        filtered = filtered.filter(
+          (r) => this.investorHolding(r, investorAddress) > 0n,
+        );
+      }
 
       // Paginate
       const start = (page - 1) * limit;
@@ -128,6 +143,9 @@ export class RwaService {
             sharesTotal: r.shares_total.toString(),
             dueLedger: Number(r.due_ledger),
             collateral: collateral ?? null,
+            myShares: investorAddress
+              ? this.investorHolding(r, investorAddress).toString()
+              : undefined,
           };
         }),
       );
@@ -611,19 +629,59 @@ export class RwaService {
 
   // ─── helpers ──────────────────────────────────────────────────────────
 
+  /**
+   * Normalise an RWA's `investors` field into `[address, shares]` pairs.
+   *
+   * The SDK decodes the on-chain map inconsistently depending on the binding —
+   * observed as an **array of `[address, i128]` tuples** (indexed object),
+   * but it can also surface as a real `Map` or an address-keyed object. Handle
+   * all three so holdings are read reliably.
+   */
+  private investorEntries(rwa: RWA): Array<[string, bigint]> {
+    const inv = rwa.investors as unknown;
+    if (!inv) return [];
+
+    const out: Array<[string, bigint]> = [];
+    if (inv instanceof Map) {
+      for (const [k, v] of inv.entries()) {
+        out.push([String(k), BigInt(v as unknown as string)]);
+      }
+      return out;
+    }
+
+    const values = Array.isArray(inv)
+      ? inv
+      : Object.values(inv as Record<string, unknown>);
+    // Array/indexed-object of [address, amount] tuples.
+    if (values.every((e) => Array.isArray(e) && e.length >= 2)) {
+      for (const entry of values as unknown[][]) {
+        out.push([String(entry[0]), BigInt(entry[1] as unknown as string)]);
+      }
+      return out;
+    }
+
+    // Fallback: plain object keyed by address.
+    for (const [k, v] of Object.entries(inv as Record<string, unknown>)) {
+      out.push([k, BigInt(v as unknown as string)]);
+    }
+    return out;
+  }
+
+  /** Read an investor's share holding from an RWA's `investors` map. */
+  private investorHolding(rwa: RWA, address: string): bigint {
+    for (const [addr, shares] of this.investorEntries(rwa)) {
+      if (addr === address) return shares;
+    }
+    return 0n;
+  }
+
   private parseRwaStruct(rwa: RWA): Record<string, unknown> {
-    // `investors` is an on-chain Map<address, shares>. Expose both the count
+    // `investors` is an on-chain map of address → shares. Expose both the count
     // and the per-address holdings so an investor can see (and claim) their
     // own allocation from the details page.
     const investorHoldings: Record<string, string> = {};
-    if (rwa.investors instanceof Map) {
-      for (const [addr, shares] of rwa.investors.entries()) {
-        investorHoldings[addr] = shares.toString();
-      }
-    } else if (rwa.investors) {
-      for (const [addr, shares] of Object.entries(rwa.investors)) {
-        investorHoldings[addr] = String(shares);
-      }
+    for (const [addr, shares] of this.investorEntries(rwa)) {
+      investorHoldings[addr] = shares.toString();
     }
     const investorCount = Object.keys(investorHoldings).length;
 

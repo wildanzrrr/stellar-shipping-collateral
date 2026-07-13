@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import {
+  IsBoolean,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -26,6 +27,16 @@ export class RwaQueryDTO {
   @Min(1)
   @Type(() => Number)
   limit?: number = 20;
+
+  @ApiPropertyOptional({
+    description:
+      'Investor only — return just the offerings the caller holds shares in.',
+    example: true,
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  mine?: boolean;
 }
 
 export class SettleDebtDTO {
