@@ -9,26 +9,17 @@ import {
   Post,
   Query,
   Req,
-  UploadedFile,
   UseGuards,
-  UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import {
-  ApiBearerAuth,
-  ApiConsumes,
-  ApiOperation,
-  ApiResponse,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { AuthenticatedRequest } from 'src/auth/jwt.types';
 import { CollateralService } from './collateral.service';
 import {
   CreateCollateralDTO,
   UpdateCollateralDTO,
-  UploadDocumentDTO,
   CollateralQueryDTO,
-  DocumentTypeEnum,
+  RequestUploadDTO,
 } from './collateral.dto';
 
 @ApiBearerAuth()
@@ -88,22 +79,19 @@ export class CollateralController {
     return this.collateralService.update(id, payload);
   }
 
-  @Post(':id/documents')
+  @Post(':id/documents/upload-url')
   @HttpCode(HttpStatus.CREATED)
-  @UseInterceptors(FileInterceptor('file'))
-  @ApiConsumes('multipart/form-data')
   @ApiOperation({
-    summary: 'Upload a collateral document',
+    summary: 'Request a presigned GCS upload URL',
     description:
-      'Uploads a file (commercial invoice, bill of lading, etc.) to GCS and links it to the collateral record.',
+      'Pre-creates a CollateralDocument row and returns a short-lived signed PUT URL. The browser uploads the file bytes directly to GCS.',
   })
-  @ApiResponse({ status: HttpStatus.CREATED, description: 'Document uploaded' })
-  uploadDocument(
-    @Param('id') id: string,
-    @Body() body: UploadDocumentDTO,
-    @UploadedFile() file: Express.Multer.File,
-  ) {
-    return this.collateralService.uploadDocument(id, file, body.documentType);
+  @ApiResponse({
+    status: HttpStatus.CREATED,
+    description: 'Signed URL generated',
+  })
+  requestUpload(@Param('id') id: string, @Body() body: RequestUploadDTO) {
+    return this.collateralService.requestDocumentUpload(id, body);
   }
 
   @Get(':id/documents/:docId')

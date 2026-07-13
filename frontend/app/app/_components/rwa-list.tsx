@@ -15,6 +15,7 @@ import {
 
 import {
   rwaApi,
+  getTokenNameSymbol,
   type KybStatus,
   type RwaSummary,
   type RwaStatus,
@@ -163,6 +164,8 @@ function RwaCard({ rwa }: { rwa: RwaSummary }) {
         )
       : 0
 
+  const tokenInfo = getTokenNameSymbol(rwa.collateral)
+
   return (
     <Link
       href={`/app/collateral/${encodeURIComponent(rwa.id)}`}
@@ -170,7 +173,16 @@ function RwaCard({ rwa }: { rwa: RwaSummary }) {
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="font-medium">{rwa.id}</span>
+          {tokenInfo ? (
+            <>
+              <span className="font-medium">{tokenInfo.name}</span>
+              <Badge variant="secondary" className="font-mono text-xs">
+                {tokenInfo.symbol}
+              </Badge>
+            </>
+          ) : (
+            <span className="font-medium">{rwa.id}</span>
+          )}
           {rwa.token && (
             <code className="font-mono text-xs text-muted-foreground">
               {rwa.token.slice(0, 8)}…

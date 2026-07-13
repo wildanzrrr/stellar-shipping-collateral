@@ -75,7 +75,8 @@ export function useWalletBalances({
     queryFn: () => fetchBalances(address as string),
     enabled: Boolean(address) && enabled,
     staleTime: 15_000,
-    refetchOnWindowFocus: false,
+    // Always fetch fresh data when the tab/window regains focus.
+    refetchOnWindowFocus: true,
     retry: 1,
   })
 }

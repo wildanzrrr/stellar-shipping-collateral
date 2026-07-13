@@ -1,9 +1,15 @@
 "use client"
 
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useSession } from "next-auth/react"
+import {
+  TrashSimple,
+  CloudArrowUp,
+  Check,
+} from "@phosphor-icons/react/dist/ssr"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -16,31 +22,43 @@ import {
   FormMessage,
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 import {
   issueCollateralSchema,
   type IssueCollateralValues,
+  type PendingDocuments,
+  DOCUMENT_SLOTS,
 } from "./issue-collateral-schema"
 import { useIssueCollateral, type IssueStep } from "./use-issue-collateral"
-import { DocumentUpload } from "./document-upload"
+import { useEstimatedAllowance } from "./use-estimated-allowance"
 
 const STEP_LABELS: Record<IssueStep, string> = {
   idle: "",
-  approving: "1/5 Approving USDC allowance…",
-  preparing: "2/5 Preparing transaction…",
+  "creating-collateral": "1/6 Creating collateral record…",
+  "uploading-documents": "2/6 Uploading documents…",
+  approving: "3/6 Approving USDC allowance…",
+  preparing: "4/6 Preparing transaction…",
   "awaiting-passkey": "Sign with passkey…",
-  submitting: "Submitting to Stellar…",
-  "creating-collateral": "5/5 Creating collateral record…",
+  submitting: "5/6 Submitting to Stellar…",
+  finalizing: "6/6 Finalizing…",
   done: "✓ Complete",
 }
 
 /**
  * Multi-step issue-collateral form:
  * - Token details (tokenId, name, symbol, raise amount, interest, due days)
+ * - Optional supporting documents (uploaded after on-chain tx + collateral record)
  * - DFNS passkey signing of the create_rwa_token transaction
  * - On-chain submission via Soroban RPC
  * - Local collateral record creation
- * - Document upload (after on-chain tx succeeds)
+ * - Document upload to GCS (non-blocking — failures don't revert the tx)
  */
 export function IssueCollateralForm() {
   const router = useRouter()
@@ -48,6 +66,16 @@ export function IssueCollateralForm() {
   const accessToken = session?.accessToken ?? ""
   const email = session?.user?.email ?? ""
   const walletId = session?.user?.walletId ?? null
+  const walletAddress = session?.user?.walletAddress ?? null
+
+  // Documents selected in the form before submission (not part of Zod schema).
+  // Keyed by document type — each type has its own file slot.
+  const [pendingDocs, setPendingDocs] = useState<PendingDocuments>({})
+
+  // Drag-state per slot for visual feedback on drag-and-drop.
+  const [draggingKey, setDraggingKey] = useState<string | null>(null)
+
+  const attachedCount = Object.values(pendingDocs).filter(Boolean).length
 
   const form = useForm<IssueCollateralValues>({
     resolver: zodResolver(issueCollateralSchema),
@@ -63,11 +91,27 @@ export function IssueCollateralForm() {
 
   const issue = useIssueCollateral({ accessToken, email, walletId })
 
+  // Watch raiseAmount + interestBps to estimate the USDC allowance the
+  // factory will pull, then compare against the shipper's on-chain balance.
+  const raiseAmount = form.watch("raiseAmount")
+  const interestBps = form.watch("interestBps")
+  const allowance = useEstimatedAllowance({
+    walletAddress,
+    raiseAmount,
+    interestBps,
+  })
+
   const isDone = issue.step === "done"
   const isBusy = issue.isPending
+  const hasInsufficientBalance =
+    !allowance.isLoading &&
+    !allowance.isError &&
+    Number(raiseAmount) > 0 &&
+    Number(interestBps) > 0 &&
+    !allowance.hasSufficientBalance
 
   function onSubmit(values: IssueCollateralValues) {
-    issue.issue(values)
+    issue.issue(values, pendingDocs)
   }
 
   return (
@@ -204,20 +248,248 @@ export function IssueCollateralForm() {
             )}
           />
 
+          {/* Document upload (optional — uploaded after on-chain tx) */}
           {!isDone && (
-            <Button type="submit" disabled={isBusy} className="w-fit">
-              {isBusy ? "Processing…" : "Issue Collateral"}
-            </Button>
+            <div className="flex flex-col gap-3 rounded-md border p-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-medium text-muted-foreground">
+                  Supporting documents (optional)
+                </Label>
+                <span className="text-[10px] text-muted-foreground">
+                  Uploaded after the on-chain tx succeeds
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {DOCUMENT_SLOTS.map((slot) => {
+                  const file = pendingDocs[slot.key]
+                  const isDragging = draggingKey === slot.key
+                  const upload = issue.docProgress[slot.key]
+                  return (
+                    <div key={slot.key} className="flex flex-col gap-1.5">
+                      <Label className="text-[11px] font-medium">
+                        {slot.label}
+                      </Label>
+                      <label
+                        htmlFor={`file-${slot.key}`}
+                        onDragOver={(e) => {
+                          e.preventDefault()
+                          setDraggingKey(slot.key)
+                        }}
+                        onDragLeave={() => setDraggingKey(null)}
+                        onDrop={(e) => {
+                          e.preventDefault()
+                          setDraggingKey(null)
+                          const f = e.dataTransfer.files?.[0]
+                          if (f) {
+                            setPendingDocs((prev) => ({
+                              ...prev,
+                              [slot.key]: f,
+                            }))
+                          }
+                        }}
+                        className={[
+                          "relative flex aspect-square cursor-pointer flex-col items-center justify-center gap-1.5 rounded-md border border-dashed p-2 text-center transition-colors",
+                          isDragging
+                            ? "border-primary bg-primary/5"
+                            : file
+                              ? "border-primary/40 bg-primary/5"
+                              : "border-muted-foreground/30 bg-muted/10 hover:border-primary/50 hover:bg-muted/20",
+                          isBusy ? "pointer-events-none opacity-50" : "",
+                        ].join(" ")}
+                      >
+                        <input
+                          id={`file-${slot.key}`}
+                          type="file"
+                          disabled={isBusy}
+                          onChange={(e) => {
+                            const f = e.target.files?.[0]
+                            if (f) {
+                              setPendingDocs((prev) => ({
+                                ...prev,
+                                [slot.key]: f,
+                              }))
+                            }
+                            e.target.value = ""
+                          }}
+                          className="sr-only"
+                        />
+                        {file ? (
+                          <>
+                            <Check
+                              size={28}
+                              weight="bold"
+                              className={
+                                upload?.status === "error"
+                                  ? "text-destructive"
+                                  : "text-primary"
+                              }
+                            />
+                            <span className="line-clamp-2 text-[11px] font-medium">
+                              {file.name}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {(file.size / 1024).toFixed(1)} KB · click to
+                              replace
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <CloudArrowUp
+                              size={28}
+                              className="text-muted-foreground"
+                            />
+                            <span className="text-[11px] font-medium">
+                              Drag & drop or click
+                            </span>
+                            <span className="line-clamp-2 text-[10px] text-muted-foreground">
+                              {slot.description}
+                            </span>
+                          </>
+                        )}
+
+                        {/* Per-document upload progress bar */}
+                        {upload && (
+                          <div className="absolute inset-x-2 bottom-2 flex flex-col gap-0.5">
+                            <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                              <div
+                                className={[
+                                  "h-full rounded-full transition-all duration-200",
+                                  upload.status === "error"
+                                    ? "bg-destructive"
+                                    : upload.status === "done"
+                                      ? "bg-primary"
+                                      : "bg-primary/70",
+                                ].join(" ")}
+                                style={{
+                                  width: `${
+                                    upload.status === "error"
+                                      ? 100
+                                      : upload.progress
+                                  }%`,
+                                }}
+                              />
+                            </div>
+                            <span className="text-[9px] text-muted-foreground">
+                              {upload.status === "done"
+                                ? "Uploaded ✓"
+                                : upload.status === "error"
+                                  ? "Upload failed"
+                                  : `Uploading… ${upload.progress}%`}
+                            </span>
+                          </div>
+                        )}
+                      </label>
+                      {file && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          disabled={isBusy}
+                          onClick={() =>
+                            setPendingDocs((prev) => {
+                              const next = { ...prev }
+                              delete next[slot.key]
+                              return next
+                            })
+                          }
+                          className="h-7 self-end text-xs"
+                        >
+                          <TrashSimple size={12} />
+                          Remove
+                        </Button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {!isDone && (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {/* Inline allowance estimate */}
+              <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                {allowance.isLoading ? (
+                  <span>Checking USDC balance…</span>
+                ) : allowance.isError ? (
+                  <span className="text-destructive">
+                    Could not fetch USDC balance
+                  </span>
+                ) : (
+                  <>
+                    <span>
+                      Est. upfront:{" "}
+                      <span className="font-medium text-foreground">
+                        {allowance.estimatedAllowanceUsdc.toLocaleString(
+                          undefined,
+                          { maximumFractionDigits: 7 }
+                        )}{" "}
+                        USDC
+                      </span>
+                    </span>
+                    <span>
+                      Your balance:{" "}
+                      <span className="font-medium text-foreground">
+                        {allowance.usdcBalanceUsdc.toLocaleString(undefined, {
+                          maximumFractionDigits: 7,
+                        })}{" "}
+                        USDC
+                      </span>
+                    </span>
+                  </>
+                )}
+              </div>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    {/* span wrapper so tooltip works on disabled button */}
+                    <span className="inline-flex">
+                      <Button
+                        type="submit"
+                        disabled={isBusy || hasInsufficientBalance}
+                        className="w-fit"
+                      >
+                        {isBusy
+                          ? "Processing…"
+                          : hasInsufficientBalance
+                            ? "Insufficient USDC"
+                            : "Issue Collateral"}
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  {hasInsufficientBalance && (
+                    <TooltipContent side="top">
+                      Your USDC balance ({" "}
+                      {allowance.usdcBalanceUsdc.toLocaleString(undefined, {
+                        maximumFractionDigits: 7,
+                      })}{" "}
+                      USDC) is insufficient. You need at least{" "}
+                      {allowance.estimatedAllowanceUsdc.toLocaleString(
+                        undefined,
+                        {
+                          maximumFractionDigits: 7,
+                        }
+                      )}{" "}
+                      USDC (shortfall:{" "}
+                      {allowance.shortfallUsdc.toLocaleString(undefined, {
+                        maximumFractionDigits: 7,
+                      })}{" "}
+                      USDC) to cover the upfront allowance.
+                    </TooltipContent>
+                  )}
+                </Tooltip>
+              </TooltipProvider>
+            </div>
           )}
         </form>
       </Form>
 
-      {/* Post-issuance: document upload */}
+      {/* Post-issuance: success summary */}
       {isDone && issue.collateralId && (
         <div className="flex flex-col gap-4 rounded-lg border p-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-medium">
-              Collateral created — upload supporting documents
+              Collateral issued successfully
             </h3>
             <div className="flex gap-2">
               <Button
@@ -235,6 +507,8 @@ export function IssueCollateralForm() {
                 onClick={() => {
                   issue.reset()
                   form.reset()
+                  setPendingDocs({})
+                  setDraggingKey(null)
                 }}
               >
                 Issue another
@@ -247,11 +521,12 @@ export function IssueCollateralForm() {
               <code className="font-mono">{issue.txHash.slice(0, 16)}…</code>
             </p>
           )}
-          <DocumentUpload
-            accessToken={accessToken}
-            collateralId={issue.collateralId}
-            documents={[]}
-          />
+          {attachedCount > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {attachedCount} document(s) uploaded to GCS. You can manage
+              documents from the collateral details page.
+            </p>
+          )}
         </div>
       )}
     </div>

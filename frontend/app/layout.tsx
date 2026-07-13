@@ -4,7 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/utils"
 import { createMetadata, siteJsonLd } from "@/lib/seo"
 
 // Locked system (design.md): Geist carries display + body, Geist Mono carries labels.
@@ -33,7 +33,12 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={cn("antialiased", fontMono.variable, "font-sans", geistSans.variable)}
+      className={cn(
+        "antialiased",
+        fontMono.variable,
+        "font-sans",
+        geistSans.variable
+      )}
     >
       <body>
         <script
@@ -42,7 +47,7 @@ export default function RootLayout({
         />
         <ThemeProvider>
           {children}
-          <Toaster />
+          <Toaster position="bottom-right" />
         </ThemeProvider>
       </body>
     </html>

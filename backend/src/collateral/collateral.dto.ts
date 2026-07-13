@@ -2,11 +2,14 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsEnum,
+  IsInt,
   IsNotEmpty,
   IsNumber,
   IsObject,
   IsOptional,
   IsString,
+  Matches,
+  MaxLength,
   Min,
 } from 'class-validator';
 
@@ -19,14 +22,18 @@ export enum DocumentTypeEnum {
 }
 
 export class CreateCollateralDTO {
-  @ApiProperty({
-    description: "On-chain RWA token id (the factory's `token_id` / `rwa_id`)",
+  @ApiPropertyOptional({
+    description:
+      "On-chain RWA token id (the factory's `token_id` / `rwa_id`). " +
+      'Omit to have the backend generate one — the returned `rwaId` must then ' +
+      'be passed as `tokenId` to `create_rwa_token` so the DB record and the ' +
+      'on-chain token share the same id.',
     example: 'INV-1023',
-    required: true,
   })
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  rwaId: string;
+  @IsNotEmpty()
+  rwaId?: string;
 
   @ApiPropertyOptional({
     description: 'Predicted SEP57 token contract address (C...)',
@@ -90,6 +97,51 @@ export class UploadDocumentDTO {
   })
   @IsEnum(DocumentTypeEnum)
   documentType: DocumentTypeEnum;
+}
+
+/**
+ * Request a presigned GCS upload URL. The browser will PUT the file bytes
+ * directly to GCS, bypassing the backend. `fileHash` is the SHA-256 of
+ * the file computed in the browser — recorded for tamper detection.
+ */
+export class RequestUploadDTO {
+  @ApiProperty({ enum: DocumentTypeEnum, required: true })
+  @IsEnum(DocumentTypeEnum)
+  documentType: DocumentTypeEnum;
+
+  @ApiProperty({ example: 'invoice-1023.pdf', required: true })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(255)
+  fileName: string;
+
+  @ApiProperty({
+    example: 102400,
+    required: true,
+    description: 'File size in bytes (max 25 MB)',
+  })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @IsNumber()
+  fileSize: number;
+
+  @ApiProperty({ example: 'application/pdf', required: true })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(127)
+  contentType: string;
+
+  @ApiProperty({
+    example: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    description: 'SHA-256 of the file content (64 hex chars)',
+    required: true,
+  })
+  @IsString()
+  @Matches(/^[a-f0-9]{64}$/i, {
+    message: 'fileHash must be a 64-char hex SHA-256 digest',
+  })
+  fileHash: string;
 }
 
 export class CollateralQueryDTO {

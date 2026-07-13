@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react"
 
 import { AppNavbar } from "@/app/app/_components/app-navbar"
 import { KycBanner } from "@/components/app/kyc-banner"
+import { useTokenRefresh } from "@/hooks/use-token-refresh"
 
 /**
  * Authenticated shell: gates /app/* behind a session, renders the top navbar
@@ -15,6 +16,9 @@ import { KycBanner } from "@/components/app/kyc-banner"
 export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const { data: session, status } = useSession()
+
+  // Proactively refresh the access token before it expires.
+  useTokenRefresh()
 
   useEffect(() => {
     if (status === "unauthenticated") router.replace("/app/auth")

@@ -155,8 +155,49 @@ Rules:
 - **Investment profile**: the questionnaire answers are submitted via `authApi.submitQuestionnaire(accessToken, answers)` (a `useMutation` or inline call in the `onComplete` handler), then the `["me"]` query is refetched to sync the profile page. The profile page reads `meQuery.data.investmentProfile` and maps raw values to labels using `QUESTIONS` from `kyc/_components/questionnaire-data.ts`.
 - **Business profile**: the business questionnaire answers are submitted via `authApi.submitBusinessQuestionnaire(accessToken, answers)` (same pattern). The profile page reads `meQuery.data.businessProfile` and maps raw values to labels using `BUSINESS_QUESTIONS` from `kyb/_components/questionnaire-data.ts`.
 - The `InvestmentQuestionnaire` component accepts `questions` and `ctaLabel` props, so both KYC and KYB pages reuse it with different question sets.
-- `QueryProvider` is already mounted in the `/app` layout. Add new providers there if a subtree needs them.
+- `QueryProvider` is already mounted in the `/app` layout. Add new providers there if a subtree needs it.
 - Return typed results from `lib/api.ts` (define an interface) — never `Promise<any>`.
+
+### On-chain transaction toast notifications
+
+When a Soroban transaction succeeds, show a `toast.success` with a link to the **Stellar Expert testnet explorer** so the user can inspect the result on-chain. Intermediate steps in a multi-step flow (e.g. approve allowance) get their own toast; the **final** step toast (e.g. "Collateral issued successfully!") supersedes the preceding on-chain step (e.g. `create_rwa_token`) — no separate toast for that step.
+
+**Pattern** (see `use-issue-collateral.ts` for the reference implementation):
+
+```ts
+import { toast } from "sonner"
+
+// After submitTransaction returns SUCCESS:
+toast.success("USDC allowance approved", {
+  action: {
+    label: "View on Stellar Expert ↗",
+    onClick: () =>
+      window.open(
+        `https://stellar.expert/explorer/testnet/tx/${submitResult.hash}`,
+        "_blank"
+      ),
+  },
+})
+
+// Final step — covers the create_rwa_token tx hash:
+toast.success("Collateral issued successfully!", {
+  action: {
+    label: "View on Stellar Expert ↗",
+    onClick: () =>
+      window.open(
+        `https://stellar.expert/explorer/testnet/tx/${submitResult.hash}`,
+        "_blank"
+      ),
+  },
+})
+```
+
+Rules:
+
+- **Use sonner's `action` API** (not a JSX `description` prop) — hooks are `.ts` files where JSX is not valid. The `action.label` + `action.onClick` pattern works in plain TypeScript.
+- **URL scheme**: `https://stellar.expert/explorer/testnet/tx/{txHash}` for transactions, `https://stellar.expert/explorer/testnet/contract/{contractId}` for contract addresses.
+- **One toast per on-chain tx** for intermediate steps (e.g. approve allowance), fired immediately after `submitTransaction` confirms `SUCCESS`. The final step toast supersedes the last on-chain tx — no duplicate toast for the step immediately before the final success toast.
+- All explorer links open in a new tab (`window.open(url, "_blank")`).
 
 ---
 
@@ -173,6 +214,43 @@ Shipping companies must complete KYB before issuing collateral. This is enforced
 
 - **`RwaList`** (shipper variant) accepts a `kybStatus` prop. When `kybStatus !== "COMPLETED"`, the "Issue collateral" button is disabled with a native `title` tooltip ("Complete KYB verification first").
 - **Backend** `CollateralService.create()` throws `ForbiddenException` if the user is not `SHIPPING_COMPANY` or `kybStatus !== COMPLETED`. See [`backend/docs/sumsub.md`](../../../backend/docs/sumsub.md) §8.1.
+
+### USDC allowance estimation & balance check
+
+The issue-collateral form (`app/app/(protected)/collateral/new/`) performs a **client-side pre-flight check** before allowing the shipper to submit. This prevents wasted passkey signing rounds for a transaction that would fail on-chain due to insufficient USDC.
+
+**Hook**: [`use-estimated-allowance.ts`](<../app/app/(protected)/collateral/new/use-estimated-allowance.ts>) — watches `raiseAmount` + `interestBps` from the form, computes the estimated upfront allowance, and compares it against the shipper's live USDC balance from Horizon (via [`useWalletBalances`](../hooks/use-wallet.ts)).
+
+**Formula** (mirrors the factory contract):
+
+```
+estimatedAllowance = raiseAmount × (interestBps + PROTOCOL_FEE_BPS) / 10_000
+```
+
+Where `PROTOCOL_FEE_BPS = 50` (0.5%), matching the on-chain protocol fee configured in the factory contract.
+
+**UI behavior**:
+
+- A live estimate row shows "Est. allowance: X USDC | Your balance: Y USDC".
+- If the shipper's USDC balance is less than the estimated allowance, the submit button is **disabled** and labelled "Insufficient USDC".
+- A shadcn `Tooltip` on the disabled button shows the exact balance, required amount, and shortfall.
+- The check is purely client-side (Horizon balance + form values) — no backend round-trip. The actual on-chain allowance is set by the `approve-factory` step in `use-issue-collateral.ts`.
+
+See [`backend/docs/rwa.md`](../../../backend/docs/rwa.md) §3 for the on-chain prerequisites this check guards against.
+
+### Token name & symbol display
+
+RWA tokens are displayed by **token name + symbol** (not raw token ID) across all surfaces. The name and symbol are set by the shipper in the issue-collateral form and stored in the `collateralData` JSON field of the `Collateral` record (see [`use-issue-collateral.ts`](<../app/app/(protected)/collateral/new/use-issue-collateral.ts>) step 5).
+
+**Helper**: [`getTokenNameSymbol()`](../lib/api.ts) in `lib/api.ts` — extracts `{ name, symbol }` from a collateral record's `collateralData`, returning `null` if either field is missing or not a string.
+
+**Surfaces** (all role-aware — shipper + investor):
+
+- **RWA list** (`_components/rwa-list.tsx` → `RwaCard`): shows token name + symbol badge when collateral data is linked, falls back to `rwa.id`.
+- **Collateral detail page** (`collateral/[rwaId]/page.tsx`): header shows name + symbol badge, falls back to `rwa.id`.
+- **History page** (`history/page.tsx`): fetches collateral records, builds a `rwaId → { name, symbol }` map, displays token name + symbol per event, falls back to `rwaId`.
+
+**Fallback rule**: when no collateral record is linked yet (e.g. before event sync runs), surfaces display the raw `rwaId`. This is expected — do not hide the row.
 
 ---
 
@@ -194,7 +272,7 @@ Prettier ([`.prettierrc`](../.prettierrc)) is authoritative — run `pnpm format
 3. **Keep pages thin.** Put JSX blocks in `_components/`, logic in a `use-*` hook.
 4. **Type everything.** New API calls → add a typed method to `lib/api.ts`; wire via `useQuery`/`useMutation`.
 5. **Style with tokens.** Product UI → shadcn semantic tokens + `cn`/`cva`. Landing → `bk-*` per `design.md`.
-6. **Feedback via toasts** (`sonner`, already top-right) — success/error, not inline error text.
+6. **Feedback via toasts** (`sonner`, already top-right) — success/error, not inline error text. For on-chain transactions, include a Stellar Expert explorer link as a toast `action` (see [On-chain transaction toast notifications](#on-chain-transaction-toast-notifications) above).
 7. **Respect boundaries.** `"use client"` only where needed; wrap `useSearchParams` in `Suspense`.
 8. **Verify** (below) before finishing.
 
@@ -202,17 +280,18 @@ Prettier ([`.prettierrc`](../.prettierrc)) is authoritative — run `pnpm format
 
 ## Do / Don't
 
-| Do                                        | Don't                                           |
-| ----------------------------------------- | ----------------------------------------------- |
-| Reuse/add shadcn components               | Hand-roll buttons, inputs, dialogs, tables      |
-| Import via `@/…` alias                    | Deep relative imports (`../../..`)              |
-| Put route UI in `_components/`            | Dump large JSX/logic in `page.tsx`              |
-| Logic in `use-*` hooks                    | Mix ceremony/mutation logic into JSX components |
-| Call the backend via `lib/api.ts` + Query | Ad-hoc `fetch()` in components                  |
-| Style with tokens (`bg-primary`, `bk-*`)  | Raw hex/rgb, arbitrary color values             |
-| `cn()` / `cva()` for classes              | String-concatenated `className`s                |
-| Type props & responses                    | `any` (use `unknown` + a real cast)             |
-| `"use client"` only when needed           | Blanket-marking pages client                    |
+| Do                                        | Don't                                            |
+| ----------------------------------------- | ------------------------------------------------ |
+| Reuse/add shadcn components               | Hand-roll buttons, inputs, dialogs, tables       |
+| Import via `@/…` alias                    | Deep relative imports (`../../..`)               |
+| Put route UI in `_components/`            | Dump large JSX/logic in `page.tsx`               |
+| Logic in `use-*` hooks                    | Mix ceremony/mutation logic into JSX components  |
+| Call the backend via `lib/api.ts` + Query | Ad-hoc `fetch()` in components                   |
+| Style with tokens (`bg-primary`, `bk-*`)  | Raw hex/rgb, arbitrary color values              |
+| `cn()` / `cva()` for classes              | String-concatenated `className`s                 |
+| Type props & responses                    | `any` (use `unknown` + a real cast)              |
+| Stellar Expert link in tx success toasts  | Bare toast with no explorer link for on-chain tx |
+| `"use client"` only when needed           | Blanket-marking pages client                     |
 
 ---
 

@@ -6,8 +6,27 @@ import { X } from "@phosphor-icons/react/dist/ssr"
 
 import { cn } from "@/lib/utils"
 
-function DialogRoot({ ...props }: React.ComponentProps<typeof Dialog.Root>) {
-  return <Dialog.Root {...props} />
+// Context so descendants can react to dialog open/close.
+const DialogOpenContext = React.createContext(false)
+
+/**
+ * Returns whether the nearest enclosing dialog is currently open.
+ * Useful for triggering side-effects (e.g. refetching data) on open.
+ */
+function useDialogOpen(): boolean {
+  return React.useContext(DialogOpenContext)
+}
+
+function DialogRoot({
+  defaultOpen = false,
+  ...props
+}: React.ComponentProps<typeof Dialog.Root>) {
+  const [open, setOpen] = React.useState(defaultOpen)
+  return (
+    <DialogOpenContext.Provider value={open}>
+      <Dialog.Root {...props} open={open} onOpenChange={setOpen} />
+    </DialogOpenContext.Provider>
+  )
 }
 
 function DialogTrigger({
@@ -115,4 +134,5 @@ export {
   DialogFooter,
   DialogTitle,
   DialogDescription,
+  useDialogOpen,
 }

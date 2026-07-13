@@ -112,10 +112,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         return token
       }
 
-      // Still valid (with a 30s safety margin) — reuse.
+      // Still valid (with a 60s safety margin) — reuse.
+      // The 60s margin aligns with the proactive refresh timer in
+      // useTokenRefresh, which fires ~60s before expiry to avoid races.
       if (
         token.accessTokenExpires &&
-        Date.now() < token.accessTokenExpires - 30_000
+        Date.now() < token.accessTokenExpires - 60_000
       ) {
         return token
       }
@@ -125,6 +127,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
     session({ session, token }) {
       session.accessToken = token.accessToken
+      session.accessTokenExpires = token.accessTokenExpires
       session.error = token.error
       if (session.user) {
         if (token.sub) session.user.id = token.sub

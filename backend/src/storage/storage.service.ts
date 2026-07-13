@@ -33,6 +33,10 @@ export class StorageService implements OnModuleInit {
   }
 
   /** Build the object key inside the bucket. */
+  get bucket(): string {
+    return this.bucketName;
+  }
+
   private buildKey(
     collateralId: string,
     documentId: string,
@@ -95,6 +99,42 @@ export class StorageService implements OnModuleInit {
       this.logger.error(`Error generating signed URL for ${key}`, error);
       throw error;
     }
+  }
+
+  /**
+   * Generate a time-limited signed PUT URL so the browser can upload
+   * directly to GCS. Returns the URL; the caller decides when to PUT.
+   * The Content-Type header is bound to the signed URL so the browser
+   * MUST send the matching header on the PUT request.
+   */
+  async getSignedUploadUrl(
+    key: string,
+    contentType: string,
+    expiresInSeconds = 900,
+  ): Promise<string> {
+    try {
+      const bucket = this.client.bucket(this.bucketName);
+      const file = bucket.file(key);
+      const [url] = await file.getSignedUrl({
+        version: 'v4',
+        action: 'write',
+        expires: Date.now() + expiresInSeconds * 1000,
+        contentType,
+      });
+      return url;
+    } catch (error) {
+      this.logger.error(`Error generating signed upload URL for ${key}`, error);
+      throw error;
+    }
+  }
+
+  /** Build a key (exposed for callers that need the path before upload). */
+  buildKeyPublic(
+    collateralId: string,
+    documentId: string,
+    fileName: string,
+  ): string {
+    return this.buildKey(collateralId, documentId, fileName);
   }
 
   /** Stream the file content as a Buffer (for internal use / downloads). */

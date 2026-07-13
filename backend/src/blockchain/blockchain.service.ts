@@ -28,12 +28,73 @@ import type { UserWithRelations } from 'src/users/users.repository';
 import { createHash, randomBytes } from 'node:crypto';
 import { xdr, StrKey } from '@stellar/stellar-sdk';
 
-/** Soroban RPC endpoint for Stellar Testnet. */
-const SOROBAN_RPC_URL =
-  process.env.SOROBAN_RPC_URL ?? 'https://soroban-testnet.stellar.org';
+/** Well-known public Soroban RPC endpoints for Stellar Testnet. */
+const DEFAULT_TESTNET_RPCS = [
+  'https://soroban-rpc.testnet.stellar.gateway.fm',
+  'https://soroban-testnet.stellar.org',
+];
+
+/**
+ * Ordered list of Soroban RPC endpoints used for failover. `SOROBAN_RPC_URL`
+ * may be a single URL or a comma-separated list; whatever is configured is
+ * tried first, then the well-known public endpoints are appended (de-duped) so
+ * a single unreachable or out-of-sync endpoint never takes the flow down.
+ */
+const SOROBAN_RPC_URLS: string[] = Array.from(
+  new Set(
+    [
+      ...(process.env.SOROBAN_RPC_URL?.split(',').map((s) => s.trim()) ?? []),
+      ...DEFAULT_TESTNET_RPCS,
+    ].filter((u) => u.length > 0),
+  ),
+);
 
 /** Network passphrase — must match the contract deployment network. */
 const NETWORK_PASSPHRASE = Networks.TESTNET;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Whether an error thrown by a Soroban RPC call is transient and worth
+ * retrying — gateway 5xx / rate-limit responses, network resets, and the
+ * out-of-sync-node "Account not found" that some public RPC providers return
+ * intermittently even for funded accounts.
+ */
+function isTransientRpcError(err: unknown): boolean {
+  const e = err as {
+    response?: { status?: number };
+    status?: number;
+    code?: string;
+    message?: string;
+    isAxiosError?: boolean;
+  };
+  const status = e?.response?.status ?? e?.status;
+  if (status === 429 || status === 502 || status === 503 || status === 504)
+    return true;
+
+  // Axios/fetch network-level failures (DNS, refused connection, unreachable
+  // host) surface as an error with no HTTP response — "fetch failed".
+  if (e?.isAxiosError && !e?.response) return true;
+
+  const code = e?.code;
+  if (
+    code === 'ERR_BAD_RESPONSE' ||
+    code === 'ERR_NETWORK' ||
+    code === 'ECONNRESET' ||
+    code === 'ECONNABORTED' ||
+    code === 'ETIMEDOUT' ||
+    code === 'ECONNREFUSED' ||
+    code === 'ENOTFOUND' ||
+    code === 'EAI_AGAIN' ||
+    code === 'UND_ERR_CONNECT_TIMEOUT'
+  )
+    return true;
+
+  const msg = err instanceof Error ? err.message : String(err);
+  return /fetch failed|network error|server unavailable|service unavailable|bad gateway|gateway timeout|\b50[234]\b|Account not found|try again|ECONN|ENOTFOUND|EAI_AGAIN/i.test(
+    msg,
+  );
+}
 
 // ─── Constants (mirrors scripts/src/lib.ts) ──────────────────────────────
 
@@ -163,17 +224,45 @@ export class BlockchainService implements OnModuleInit {
   /** Admin's Stellar public key (G...) — used as `operator` / source account. */
   private adminAddress!: string;
 
-  /** Identity-verifier contract client. */
-  private identityClient!: IdentityVerifierClient;
+  /** Identity-verifier contract clients — one per RPC endpoint. */
+  private identityClients!: IdentityVerifierClient[];
 
-  /** Factory contract client (RWA tokenization). */
-  private factoryClient!: FactoryClient;
+  /** Factory contract clients (RWA tokenization) — one per RPC endpoint. */
+  private factoryClients!: FactoryClient[];
 
   /** Factory contract ID (C...). */
   private factoryContractId!: string;
 
-  /** Soroban RPC server instance (shared across all callers). */
-  private rpcServer!: stellarRpc.Server;
+  /** Soroban RPC server instances — one per RPC endpoint. */
+  private rpcServers!: stellarRpc.Server[];
+
+  /** Index of the currently active RPC endpoint (rotated on failover). */
+  private activeRpc = 0;
+
+  // Immutable factory config reads — cached after the first success so they
+  // stay off the hot path (and out of RPC failure modes) on every issuance.
+  private cachedUsdcAddress?: string;
+  private cachedProtocolFeeBps?: bigint;
+
+  /** The active identity-verifier client for the current endpoint. */
+  private get identityClient(): IdentityVerifierClient {
+    return this.identityClients[this.activeRpc];
+  }
+
+  /** The active factory client for the current endpoint. */
+  private get factoryClient(): FactoryClient {
+    return this.factoryClients[this.activeRpc];
+  }
+
+  /** The active Soroban RPC server for the current endpoint. */
+  private get rpcServer(): stellarRpc.Server {
+    return this.rpcServers[this.activeRpc];
+  }
+
+  /** The active RPC endpoint URL. */
+  private get activeRpcUrl(): string {
+    return SOROBAN_RPC_URLS[this.activeRpc];
+  }
 
   constructor(private readonly config: ConfigService) {}
 
@@ -196,38 +285,53 @@ export class BlockchainService implements OnModuleInit {
     this.adminAddress = this.adminKeypair.publicKey();
     this.logger.log(`Admin address derived: ${this.adminAddress}`);
 
-    // Build the identity-verifier contract client with the admin as the
-    // source account + signer.
+    // Build one client trio (identity + factory + raw RPC server) per RPC
+    // endpoint so `withRpcRetry` can rotate to a healthy endpoint when the
+    // active one is unreachable / out-of-sync.
     const net = identityVerifierNetworks.testnet;
-    this.identityClient = new IdentityVerifierClient({
-      contractId: net.contractId,
-      networkPassphrase: NETWORK_PASSPHRASE,
-      rpcUrl: SOROBAN_RPC_URL,
-      publicKey: this.adminAddress,
-      ...stellarContract.basicNodeSigner(this.adminKeypair, NETWORK_PASSPHRASE),
-    });
+    const factoryNet = factoryNetworks.testnet;
+    this.factoryContractId = factoryNet.contractId;
+
+    this.identityClients = SOROBAN_RPC_URLS.map(
+      (rpcUrl) =>
+        new IdentityVerifierClient({
+          contractId: net.contractId,
+          networkPassphrase: NETWORK_PASSPHRASE,
+          rpcUrl,
+          publicKey: this.adminAddress,
+          ...stellarContract.basicNodeSigner(
+            this.adminKeypair,
+            NETWORK_PASSPHRASE,
+          ),
+        }),
+    );
+
+    this.factoryClients = SOROBAN_RPC_URLS.map(
+      (rpcUrl) =>
+        new FactoryClient({
+          contractId: factoryNet.contractId,
+          networkPassphrase: NETWORK_PASSPHRASE,
+          rpcUrl,
+          publicKey: this.adminAddress,
+          ...stellarContract.basicNodeSigner(
+            this.adminKeypair,
+            NETWORK_PASSPHRASE,
+          ),
+        }),
+    );
+
+    this.rpcServers = SOROBAN_RPC_URLS.map(
+      (rpcUrl) => new stellarRpc.Server(rpcUrl),
+    );
 
     this.logger.log(
       `IdentityVerifier client ready → contract ${net.contractId}`,
     );
-
-    // Build the factory contract client — contract ID comes from the
-    // generated bindings (networks.testnet.contractId), not from an env var.
-    const factoryNet = factoryNetworks.testnet;
-    this.factoryContractId = factoryNet.contractId;
-    this.factoryClient = new FactoryClient({
-      contractId: factoryNet.contractId,
-      networkPassphrase: NETWORK_PASSPHRASE,
-      rpcUrl: SOROBAN_RPC_URL,
-      publicKey: this.adminAddress,
-      ...stellarContract.basicNodeSigner(this.adminKeypair, NETWORK_PASSPHRASE),
-    });
-
-    // Soroban RPC server (used by events listener + transaction submission).
-    this.rpcServer = new stellarRpc.Server(SOROBAN_RPC_URL);
-
     this.logger.log(
       `Factory client ready → contract ${this.factoryContractId}`,
+    );
+    this.logger.log(
+      `Soroban RPC endpoints (failover order): ${SOROBAN_RPC_URLS.join(', ')}`,
     );
   }
 
@@ -345,7 +449,7 @@ export class BlockchainService implements OnModuleInit {
     return new FactoryClient({
       contractId: this.factoryContractId,
       networkPassphrase: NETWORK_PASSPHRASE,
-      rpcUrl: SOROBAN_RPC_URL,
+      rpcUrl: this.activeRpcUrl,
       publicKey: shipperAddress,
       // No signer — tx will be signed by DFNS on the frontend
     });
@@ -371,9 +475,53 @@ export class BlockchainService implements OnModuleInit {
     return this.rpcServer;
   }
 
+  /**
+   * Retry a Soroban RPC call on transient failures (gateway 5xx, rate limits,
+   * network resets, unreachable host / "fetch failed", out-of-sync-node
+   * "Account not found"). On each transient failure it rotates to the next
+   * configured RPC endpoint before backing off, so an unreachable or stale
+   * endpoint is bypassed rather than retried in place. Non-transient errors
+   * (e.g. real simulation failures) bubble up immediately so we don't mask
+   * genuine problems.
+   *
+   * `fn` reads the active client/server via getters, so simply advancing
+   * `activeRpc` makes the next attempt target a different endpoint.
+   */
+  private async withRpcRetry<T>(
+    fn: () => Promise<T>,
+    label: string,
+  ): Promise<T> {
+    const n = SOROBAN_RPC_URLS.length;
+    // Give every endpoint at least two passes (min 4 attempts) so a brief
+    // outage across all endpoints still gets a couple of retries.
+    const attempts = Math.max(4, n * 2);
+    let lastErr: unknown;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastErr = err;
+        if (i === attempts - 1 || !isTransientRpcError(err)) throw err;
+        const failedUrl = this.activeRpcUrl;
+        if (n > 1) this.activeRpc = (this.activeRpc + 1) % n;
+        const delayMs = 400 * 2 ** Math.min(i, 3); // 400ms → 3.2s cap
+        this.logger.warn(
+          `Transient RPC error on ${label} via ${failedUrl} (attempt ${i + 1}/${attempts}); switching to ${this.activeRpcUrl}, retry in ${delayMs}ms: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        await sleep(delayMs);
+      }
+    }
+    throw lastErr;
+  }
+
   /** Fetch the latest ledger sequence from Soroban RPC. */
   async getLatestLedger(): Promise<number> {
-    const resp = await this.rpcServer.getLatestLedger();
+    const resp = await this.withRpcRetry(
+      () => this.rpcServer.getLatestLedger(),
+      'getLatestLedger',
+    );
     return resp.sequence;
   }
 
@@ -399,7 +547,13 @@ export class BlockchainService implements OnModuleInit {
       seqNum: tx.sequence,
     });
 
-    const sent = await this.rpcServer.sendTransaction(tx);
+    // Re-sending the same signed envelope is safe: a duplicate lands as
+    // TRY_AGAIN_LATER / DUPLICATE rather than double-applying, so wrapping the
+    // send in the failover retry only helps when an endpoint is unreachable.
+    const sent = await this.withRpcRetry(
+      () => this.rpcServer.sendTransaction(tx),
+      'sendTransaction',
+    );
 
     this.logger.debug('sendTransaction result', {
       status: sent.status,
@@ -420,9 +574,13 @@ export class BlockchainService implements OnModuleInit {
       };
     }
 
-    const final = await this.rpcServer.pollTransaction(sent.hash, {
-      attempts: 20,
-    });
+    // The tx is already in the mempool (PENDING) at this point, so polling is
+    // idempotent — wrap it in a retry so a transient gateway 5xx while polling
+    // doesn't fail an operation that actually succeeded on-chain.
+    const final = await this.withRpcRetry(
+      () => this.rpcServer.pollTransaction(sent.hash, { attempts: 20 }),
+      'pollTransaction',
+    );
 
     this.logger.debug('pollTransaction result', {
       status: final.status,
@@ -443,14 +601,28 @@ export class BlockchainService implements OnModuleInit {
 
   /** Read the USDC (payment token) contract address from the factory. */
   async getUsdcAddress(): Promise<string> {
-    const tx = await this.factoryClient.usdc();
+    // Immutable factory config — fetch once, then serve from cache.
+    if (this.cachedUsdcAddress) return this.cachedUsdcAddress;
+    const tx = await this.withRpcRetry(
+      () => this.factoryClient.usdc(),
+      'factory.usdc',
+    );
+    this.cachedUsdcAddress = tx.result;
     return tx.result;
   }
 
   /** Read the protocol fee (bps) configured on the factory. */
   async getProtocolFeeBps(): Promise<bigint> {
-    const tx = await this.factoryClient.protocol_fee_bps();
-    return BigInt(tx.result);
+    // Immutable factory config — fetch once, then serve from cache.
+    if (this.cachedProtocolFeeBps !== undefined)
+      return this.cachedProtocolFeeBps;
+    const tx = await this.withRpcRetry(
+      () => this.factoryClient.protocol_fee_bps(),
+      'factory.protocol_fee_bps',
+    );
+    const value = BigInt(tx.result);
+    this.cachedProtocolFeeBps = value;
+    return value;
   }
 
   /**
@@ -492,7 +664,10 @@ export class BlockchainService implements OnModuleInit {
     expirationLedger: number;
   }): Promise<string> {
     const usdcAddress = await this.getUsdcAddress();
-    const account = await this.rpcServer.getAccount(opts.ownerAddress);
+    const account = await this.withRpcRetry(
+      () => this.rpcServer.getAccount(opts.ownerAddress),
+      'getAccount(owner)',
+    );
     const tokenContract = new Contract(usdcAddress);
 
     const raw = new TransactionBuilder(account, {
@@ -515,7 +690,10 @@ export class BlockchainService implements OnModuleInit {
       .setTimeout(300)
       .build();
 
-    const sim = await this.rpcServer.simulateTransaction(raw);
+    const sim = await this.withRpcRetry(
+      () => this.rpcServer.simulateTransaction(raw),
+      'simulateTransaction(approve)',
+    );
     if (stellarRpc.Api.isSimulationError(sim)) {
       throw new Error(`approve simulation failed: ${sim.error}`);
     }

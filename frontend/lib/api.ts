@@ -39,6 +39,25 @@ function bearer(accessToken: string): HeadersInit {
   return { Authorization: `Bearer ${accessToken}` }
 }
 
+function bearerJson(accessToken: string): HeadersInit {
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+  }
+}
+
+/** SHA-256 of a File/Blob as a 64-char lowercase hex string. */
+async function sha256Hex(blob: Blob): Promise<string> {
+  const buf = await blob.arrayBuffer()
+  const digest = await crypto.subtle.digest("SHA-256", buf)
+  const bytes = new Uint8Array(digest)
+  let out = ""
+  for (let i = 0; i < bytes.length; i++) {
+    out += bytes[i].toString(16).padStart(2, "0")
+  }
+  return out
+}
+
 // ---- shared types ----
 
 export type UserRole = "INVESTOR" | "SHIPPING_COMPANY"
@@ -439,19 +458,43 @@ export interface CollateralDocument {
   createdAt: string
 }
 
+/**
+ * Extract token name + symbol from a collateral record's `collateralData`.
+ * Returns `null` if either field is missing or not a string.
+ */
+export function getTokenNameSymbol(
+  collateral:
+    { collateralData: Record<string, unknown> | null } | null | undefined
+): { name: string; symbol: string } | null {
+  const data = collateral?.collateralData
+  if (!data) return null
+  const name = data["name"]
+  const symbol = data["symbol"]
+  if (typeof name !== "string" || typeof symbol !== "string") return null
+  if (!name || !symbol) return null
+  return { name, symbol }
+}
+
 export interface CreateRwaTokenPayload {
   raiseAmount: string
   interestBps: string
   dueDays: number
   name: string
   symbol: string
+  /**
+   * Reuse a specific on-chain token id. When creating the collateral record
+   * first, pass its `rwaId` here so the on-chain token shares the same id.
+   * (Ignored by `prepareApproveFactory`.)
+   */
+  tokenId?: string
 }
 
 export const collateralApi = {
   create: (
     accessToken: string,
     body: {
-      rwaId: string
+      // Omit to have the backend generate the rwaId (returned in the response).
+      rwaId?: string
       tokenAddress?: string
       collateralData?: Record<string, unknown>
     }
@@ -494,11 +537,20 @@ export const collateralApi = {
         body: JSON.stringify(body),
       }
     ),
+  /**
+   * Two-step upload (presigned GCS URL):
+   *   1. Request an upload URL — backend pre-creates the document row.
+   *   2. PUT the file bytes directly to GCS using the returned URL.
+   *
+   * SHA-256 of the file is computed in the browser and sent to the
+   * backend for tamper detection on download.
+   */
   uploadDocument: async (
     accessToken: string,
     collateralId: string,
     file: File,
-    documentType: DocumentTypeKey
+    documentType: DocumentTypeKey,
+    onProgress?: (percent: number) => void
   ): Promise<{
     id: string
     documentType: DocumentTypeKey
@@ -506,38 +558,72 @@ export const collateralApi = {
     fileHash: string
     gcsUri: string
   }> => {
-    const form = new FormData()
-    form.append("file", file)
-    form.append("documentType", documentType)
-    const r = await fetch(
-      `${base}/collateral/${encodeURIComponent(collateralId)}/documents`,
+    // 1. Hash the file in the browser.
+    const fileHash = await sha256Hex(file)
+
+    // 2. Request a presigned PUT URL.
+    const urlRes = await fetch(
+      `${base}/collateral/${encodeURIComponent(collateralId)}/documents/upload-url`,
       {
         method: "POST",
-        headers: bearer(accessToken),
-        body: form,
+        headers: bearerJson(accessToken),
+        body: JSON.stringify({
+          documentType,
+          fileName: file.name,
+          fileSize: file.size,
+          contentType: file.type || "application/octet-stream",
+          fileHash,
+        }),
       }
     )
-    if (!r.ok) {
-      let message = `${r.status}`
-      try {
-        const body: unknown = await r.json()
-        if (body && typeof body === "object" && "message" in body) {
-          const m = (body as { message: unknown }).message
-          message = Array.isArray(m) ? m.join(", ") : String(m)
-        }
-      } catch {
-        message = `${r.status} ${await r.text()}`
-      }
-      throw new Error(message)
+    if (!urlRes.ok) {
+      throw new Error(
+        `Failed to get upload URL: ${urlRes.status} ${await urlRes.text()}`
+      )
     }
-    const json = (await r.json()) as Wrapped<{
+    const urlJson = (await urlRes.json()) as Wrapped<{
       id: string
       documentType: DocumentTypeKey
       fileName: string
       fileHash: string
       gcsUri: string
+      uploadUrl: string
     }>
-    return json.data
+    const { uploadUrl, ...rest } = urlJson.data
+
+    // 3. PUT the file bytes directly to GCS. The signed URL was bound to
+    //    this Content-Type, so we MUST send the matching header. XHR is used
+    //    (rather than fetch) so we get real upload-progress events for the
+    //    per-document progress bar.
+    onProgress?.(0)
+    await new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open("PUT", uploadUrl)
+      xhr.setRequestHeader(
+        "Content-Type",
+        file.type || "application/octet-stream"
+      )
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          onProgress?.(Math.round((e.loaded / e.total) * 100))
+        }
+      }
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          onProgress?.(100)
+          resolve()
+        } else {
+          reject(
+            new Error(`GCS upload failed: ${xhr.status} ${xhr.responseText}`)
+          )
+        }
+      }
+      xhr.onerror = () =>
+        reject(new Error("GCS upload failed: network error"))
+      xhr.send(file)
+    })
+
+    return rest
   },
   getDocumentUrl: (accessToken: string, collateralId: string, docId: string) =>
     req<{

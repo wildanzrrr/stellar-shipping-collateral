@@ -1,13 +1,14 @@
 "use client"
 
 import { signOut } from "next-auth/react"
-
+import { useEffect } from "react"
 import {
   DialogClose,
   DialogContent,
   DialogHeader,
   DialogRoot,
   DialogTitle,
+  useDialogOpen,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -45,9 +46,19 @@ export function WalletModal({
   walletId,
   walletAddress,
 }: WalletModalProps) {
-  const { data: balances, isLoading } = useWalletBalances({
+  const {
+    data: balances,
+    isLoading,
+    refetch,
+  } = useWalletBalances({
     address: walletAddress,
   })
+
+  // Always fetch fresh balances when the modal opens.
+  const isOpen = useDialogOpen()
+  useEffect(() => {
+    if (isOpen) refetch()
+  }, [isOpen, refetch])
 
   const transfer = useTransfer({ accessToken, email, walletId })
 

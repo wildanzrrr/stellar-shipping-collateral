@@ -6,7 +6,13 @@ import { useSession } from "next-auth/react"
 import { Receipt } from "@phosphor-icons/react/dist/ssr"
 
 import { Badge } from "@/components/ui/badge"
-import { rwaApi, type TransactionEvent } from "@/lib/api"
+import {
+  collateralApi,
+  getTokenNameSymbol,
+  rwaApi,
+  type CollateralRecord,
+  type TransactionEvent,
+} from "@/lib/api"
 
 const EVENT_LABELS: Record<string, string> = {
   RWA_CREATED: "RWA Created",
@@ -46,7 +52,21 @@ export default function HistoryPage() {
     enabled: Boolean(accessToken),
   })
 
+  // Fetch collateral records to map rwaId → token name + symbol
+  const collateralQuery = useQuery({
+    queryKey: ["collateral-all"],
+    queryFn: () => collateralApi.list(accessToken, 1, 100),
+    enabled: Boolean(accessToken),
+  })
+
   const events = eventsQuery.data?.items ?? []
+
+  // Build a lookup map: rwaId → { name, symbol }
+  const tokenMap = new Map<string, { name: string; symbol: string }>()
+  for (const c of (collateralQuery.data?.items ?? []) as CollateralRecord[]) {
+    const info = getTokenNameSymbol(c)
+    if (info) tokenMap.set(c.rwaId, info)
+  }
 
   return (
     <div className="flex flex-col gap-6 py-6">
@@ -84,7 +104,21 @@ export default function HistoryPage() {
                     {EVENT_LABELS[ev.eventType] ?? ev.eventType}
                   </Badge>
                   <div className="flex flex-col">
-                    <span className="text-xs font-medium">{ev.rwaId}</span>
+                    {(() => {
+                      const info = tokenMap.get(ev.rwaId)
+                      return info ? (
+                        <>
+                          <span className="text-xs font-medium">
+                            {info.name}
+                          </span>
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {info.symbol}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-xs font-medium">{ev.rwaId}</span>
+                      )
+                    })()}
                     {ev.investorAddress && (
                       <code className="font-mono text-xs text-muted-foreground">
                         {ev.investorAddress.slice(0, 12)}…

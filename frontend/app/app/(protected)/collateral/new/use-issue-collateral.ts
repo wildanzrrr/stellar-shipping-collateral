@@ -8,15 +8,32 @@ import { webauthn } from "@/lib/dfns"
 import { rwaApi, collateralApi, walletApi, type PreparedTx } from "@/lib/api"
 
 import type { IssueCollateralValues } from "./issue-collateral-schema"
+import type {
+  PendingDocuments,
+  DocumentTypeKey,
+} from "./issue-collateral-schema"
 
 export type IssueStep =
   | "idle"
-  | "preparing"
+  | "creating-collateral"
+  | "uploading-documents"
   | "approving"
+  | "preparing"
   | "awaiting-passkey"
   | "submitting"
-  | "creating-collateral"
+  | "finalizing"
   | "done"
+
+export type DocUploadStatus = "uploading" | "done" | "error"
+
+/** Per-document-slot upload progress, surfaced to the form for progress bars. */
+export interface DocProgress {
+  status: DocUploadStatus
+  /** 0–100 */
+  progress: number
+}
+
+export type DocProgressMap = Partial<Record<DocumentTypeKey, DocProgress>>
 
 export interface UseIssueCollateralArgs {
   accessToken: string
@@ -25,7 +42,10 @@ export interface UseIssueCollateralArgs {
 }
 
 export interface UseIssueCollateralResult {
-  issue: (values: IssueCollateralValues) => Promise<{
+  issue: (
+    values: IssueCollateralValues,
+    documents?: PendingDocuments
+  ) => Promise<{
     collateralId: string
     rwaId: string
     txHash: string
@@ -36,17 +56,20 @@ export interface UseIssueCollateralResult {
   preparedTx: PreparedTx | null
   txHash: string | null
   collateralId: string | null
+  docProgress: DocProgressMap
   reset: () => void
 }
 
 /**
- * Full issue-collateral flow:
- * 1. Approve the factory as a USDC spender (upfront interest + protocol fee)
+ * Full issue-collateral flow (documents-first ordering):
+ * 1. Create the local collateral record → returns its id + generated rwaId
+ * 2. Upload the supporting documents to that record (per-box progress bars;
+ *    non-blocking — upload failures don't stop the on-chain flow)
+ * 3. Approve the factory as a USDC spender (upfront interest + protocol fee)
  *    — DFNS sign → submit. Required before create_rwa_token can transfer_from.
- * 2. Prepare create_rwa_token → get unsigned XDR + predicted token address
- * 3. DFNS sign init → WebAuthn → sign complete (gets signedTxXdr)
- * 4. Submit signed tx to Soroban RPC
- * 5. Create local collateral record linked to the on-chain RWA
+ * 4. Prepare create_rwa_token, reusing the record's rwaId as the token id
+ * 5. DFNS sign → submit the signed tx to Soroban RPC
+ * 6. Finalize: write the token address + tx hash back onto the record
  */
 export function useIssueCollateral({
   accessToken,
@@ -58,8 +81,12 @@ export function useIssueCollateral({
   const [preparedTx, setPreparedTx] = useState<PreparedTx | null>(null)
   const [txHash, setTxHash] = useState<string | null>(null)
   const [collateralId, setCollateralId] = useState<string | null>(null)
+  const [docProgress, setDocProgress] = useState<DocProgressMap>({})
 
-  async function issueFlow(values: IssueCollateralValues) {
+  async function issueFlow(
+    values: IssueCollateralValues,
+    documents: PendingDocuments = {}
+  ) {
     if (!walletId) throw new Error("Your wallet is still being set up")
     const wid = walletId
 
@@ -123,7 +150,85 @@ export function useIssueCollateral({
       symbol: values.symbol,
     }
 
-    // 1. Approve the factory as a USDC spender for the upfront fee, then sign
+    // 1. Create the collateral record FIRST so we have an id to attach
+    //    documents to, and an rwaId to reuse as the on-chain token id. The
+    //    backend generates the rwaId when we omit it.
+    setStep("creating-collateral")
+    setStatusMsg("Creating collateral record…")
+    const collateral = await collateralApi.create(accessToken, {
+      collateralData: {
+        name: values.name,
+        symbol: values.symbol,
+        raiseAmount: raiseAmountRaw,
+        interestBps: values.interestBps,
+        dueDays: Number(values.dueDays),
+        description: values.description ?? "",
+      },
+    })
+    setCollateralId(collateral.id)
+    const rwaId = collateral.rwaId
+    if (!rwaId) throw new Error("Backend did not return an RWA id")
+
+    // 2. Upload the supporting documents to the new record (with per-box
+    //    progress bars). Upload failures are non-blocking — the on-chain flow
+    //    still proceeds and documents can be re-uploaded from the details page.
+    const docEntries = Object.entries(documents).filter(
+      (v): v is [DocumentTypeKey, File] => v[1] !== undefined
+    )
+    if (docEntries.length > 0) {
+      setStep("uploading-documents")
+      setStatusMsg(`Uploading ${docEntries.length} document(s)…`)
+      // Seed every slot at 0% so each box shows a progress bar immediately.
+      setDocProgress(
+        Object.fromEntries(
+          docEntries.map(([docType]) => [
+            docType,
+            { status: "uploading", progress: 0 },
+          ])
+        )
+      )
+      const uploadErrors: string[] = []
+      // Upload in parallel so each document box animates its own progress bar.
+      await Promise.all(
+        docEntries.map(async ([docType, file]) => {
+          try {
+            await collateralApi.uploadDocument(
+              accessToken,
+              collateral.id,
+              file,
+              docType,
+              (percent) =>
+                setDocProgress((prev) => ({
+                  ...prev,
+                  [docType]: { status: "uploading", progress: percent },
+                }))
+            )
+            setDocProgress((prev) => ({
+              ...prev,
+              [docType]: { status: "done", progress: 100 },
+            }))
+          } catch (err) {
+            const msg =
+              err instanceof Error ? err.message : "Unknown upload error"
+            uploadErrors.push(`${file.name}: ${msg}`)
+            setDocProgress((prev) => ({
+              ...prev,
+              [docType]: { status: "error", progress: 0 },
+            }))
+          }
+        })
+      )
+      if (uploadErrors.length > 0) {
+        toast.warning(
+          `${uploadErrors.length}/${docEntries.length} document(s) failed to upload`,
+          { description: uploadErrors.join("; ") }
+        )
+      } else {
+        toast.success(`${docEntries.length} document(s) uploaded`)
+      }
+    }
+
+    // 3. Approve the factory as a USDC spender for the upfront fee, then sign
     //    + submit it. create_rwa_token's transfer_from needs this allowance.
     setStep("approving")
     setStatusMsg("Preparing USDC approval…")
@@ -147,54 +252,43 @@ export function useIssueCollateral({
       },
     })
 
-    // 2. Prepare create_rwa_token (now that the allowance is on-chain)
+    // 4. Prepare create_rwa_token (now that the allowance is on-chain), reusing
+    //    the collateral record's rwaId as the on-chain token id.
     setStep("preparing")
     setStatusMsg("Preparing create_rwa_token transaction…")
-    const prepared = await rwaApi.prepareCreateRwaToken(
-      accessToken,
-      createTokenPayload
-    )
+    const prepared = await rwaApi.prepareCreateRwaToken(accessToken, {
+      ...createTokenPayload,
+      tokenId: rwaId,
+    })
     setPreparedTx(prepared)
 
-    // 3 + 4. DFNS sign the create_rwa_token XDR and submit it to Soroban
+    // 5. DFNS sign the create_rwa_token XDR and submit it to Soroban.
     setStep("awaiting-passkey")
     setStatusMsg("Sign the transaction with your passkey…")
     const submitResult = await signAndSubmit(prepared.txXdr)
     setTxHash(submitResult.hash)
 
-    // Toast for the create_rwa_token on-chain success — link to the
-    // predicted token contract (or the tx) on Stellar Expert (testnet).
-    const tokenAddress = prepared.predictedTokenAddress
-    const expertUrl = tokenAddress
-      ? `https://stellar.expert/explorer/testnet/contract/${tokenAddress}`
-      : `https://stellar.expert/explorer/testnet/tx/${submitResult.hash}`
-    toast.success("RWA token created on-chain", {
-      action: {
-        label: "View on Stellar Expert ↗",
-        onClick: () => window.open(expertUrl, "_blank"),
-      },
-    })
-
-    // 5. Create local collateral record
-    setStep("creating-collateral")
-    setStatusMsg("Creating collateral record…")
-    // Backend auto-generates tokenId; use it as the RWA identifier
-    const rwaId = prepared.tokenId
-    if (!rwaId) throw new Error("Backend did not return a token ID")
-    const collateral = await collateralApi.create(accessToken, {
-      rwaId,
-      tokenAddress: prepared.predictedTokenAddress ?? undefined,
-      collateralData: {
-        name: values.name,
-        symbol: values.symbol,
-        raiseAmount: raiseAmountRaw,
-        interestBps: values.interestBps,
-        dueDays: Number(values.dueDays),
-        description: values.description ?? "",
-        txHash: submitResult.hash,
-      },
-    })
-    setCollateralId(collateral.id)
+    // 6. Finalize: record the token address + tx hash on the collateral record.
+    setStep("finalizing")
+    setStatusMsg("Finalizing collateral record…")
+    try {
+      await collateralApi.update(accessToken, collateral.id, {
+        tokenAddress: prepared.predictedTokenAddress ?? undefined,
+        collateralData: {
+          name: values.name,
+          symbol: values.symbol,
+          raiseAmount: raiseAmountRaw,
+          interestBps: values.interestBps,
+          dueDays: Number(values.dueDays),
+          description: values.description ?? "",
+          txHash: submitResult.hash,
+        },
+      })
+    } catch (err) {
+      // Non-blocking — the on-chain token exists; the events poller will still
+      // reconcile the record via the rwa_created event.
+      console.error("Failed to finalize collateral record", err)
+    }
 
     setStep("done")
     setStatusMsg("")
@@ -217,7 +311,13 @@ export function useIssueCollateral({
   }
 
   const mutation = useMutation({
-    mutationFn: issueFlow,
+    mutationFn: ({
+      values,
+      documents,
+    }: {
+      values: IssueCollateralValues
+      documents: PendingDocuments
+    }) => issueFlow(values, documents),
     onError: (err) => {
       setStatusMsg("")
       setStep("idle")
@@ -233,16 +333,19 @@ export function useIssueCollateral({
     setPreparedTx(null)
     setTxHash(null)
     setCollateralId(null)
+    setDocProgress({})
   }
 
   return {
-    issue: (v: IssueCollateralValues) => mutation.mutateAsync(v),
+    issue: (v: IssueCollateralValues, docs?: PendingDocuments) =>
+      mutation.mutateAsync({ values: v, documents: docs ?? {} }),
     isPending: mutation.isPending,
     step,
     statusMsg,
     preparedTx,
     txHash,
     collateralId,
+    docProgress,
     reset,
   }
 }

@@ -10,12 +10,18 @@ import {
   Receipt,
   FileText,
   Coins,
+  DownloadSimple,
 } from "@phosphor-icons/react/dist/ssr"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 
-import { rwaApi, collateralApi, type RwaStatus } from "@/lib/api"
+import {
+  rwaApi,
+  collateralApi,
+  getTokenNameSymbol,
+  type RwaStatus,
+} from "@/lib/api"
 
 import { useTxAction } from "./use-tx-action"
 
@@ -73,6 +79,8 @@ export default function CollateralDetailPage() {
 
   const rwa = rwaQuery.data
   const collateral = collateralQuery.data
+
+  const tokenInfo = getTokenNameSymbol(collateral)
 
   const isShipper = role === "SHIPPING_COMPANY"
   const fundedPct =
@@ -148,7 +156,16 @@ export default function CollateralDetailPage() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-medium">{rwa.id}</h1>
+            {tokenInfo ? (
+              <>
+                <h1 className="text-lg font-medium">{tokenInfo.name}</h1>
+                <Badge variant="secondary" className="font-mono text-xs">
+                  {tokenInfo.symbol}
+                </Badge>
+              </>
+            ) : (
+              <h1 className="text-lg font-medium">{rwa.id}</h1>
+            )}
             <Badge
               className={STATUS_STYLES[rwa.status] ?? STATUS_STYLES.Unknown}
             >
@@ -279,22 +296,59 @@ export default function CollateralDetailPage() {
               </div>
             )}
             {collateral.documents && collateral.documents.length > 0 && (
-              <div className="mt-2 flex flex-col gap-1">
+              <div className="mt-2 flex flex-col gap-2">
                 <span className="text-xs font-medium text-muted-foreground">
                   Documents ({collateral.documents.length})
                 </span>
-                {collateral.documents.map((doc) => (
-                  <div
-                    key={doc.id}
-                    className="flex items-center gap-2 rounded-md border px-2 py-1 text-xs"
-                  >
-                    <FileText size={12} className="text-muted-foreground" />
-                    <span className="font-medium">{doc.fileName}</span>
-                    <span className="text-muted-foreground">
-                      · {doc.documentType.replace(/_/g, " ").toLowerCase()}
-                    </span>
-                  </div>
-                ))}
+                {(
+                  [
+                    "SHIPPING_CONTRACT",
+                    "BILL_OF_LADING",
+                    "PROOF_OF_DELIVERY",
+                    "COMMERCIAL_INVOICE",
+                    "NOTICE_OF_ASSIGNMENT",
+                  ] as const
+                ).flatMap((docType) => {
+                  const docs = collateral.documents!.filter(
+                    (d) => d.documentType === docType
+                  )
+                  if (docs.length === 0) return []
+                  return docs.map((doc) => (
+                    <div
+                      key={doc.id}
+                      className="flex items-center justify-between rounded-md border px-3 py-2 text-xs"
+                    >
+                      <div className="flex items-center gap-2">
+                        <FileText size={14} className="text-muted-foreground" />
+                        <div className="flex flex-col">
+                          <span className="font-medium">{doc.fileName}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {docType.replace(/_/g, " ").toLowerCase()}
+                          </span>
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={async () => {
+                          try {
+                            const result = await collateralApi.getDocumentUrl(
+                              accessToken,
+                              collateral.id,
+                              doc.id
+                            )
+                            window.open(result.signedUrl, "_blank")
+                          } catch {
+                            // error toast handled by caller
+                          }
+                        }}
+                      >
+                        <DownloadSimple size={14} />
+                      </Button>
+                    </div>
+                  ))
+                })}
               </div>
             )}
           </div>

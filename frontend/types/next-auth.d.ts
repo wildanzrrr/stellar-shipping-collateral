@@ -4,6 +4,7 @@ import type { KycStatus, KybStatus, UserRole } from "@/lib/api"
 declare module "next-auth" {
   interface Session {
     accessToken?: string
+    accessTokenExpires?: number
     error?: "RefreshTokenError"
     user: {
       id?: string

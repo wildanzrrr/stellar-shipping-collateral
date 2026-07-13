@@ -1,5 +1,47 @@
 import { z } from "zod"
 
+export type DocumentTypeKey =
+  | "COMMERCIAL_INVOICE"
+  | "BILL_OF_LADING"
+  | "PROOF_OF_DELIVERY"
+  | "SHIPPING_CONTRACT"
+  | "NOTICE_OF_ASSIGNMENT"
+
+/**
+ * Optional supporting documents keyed by their type. Each entry is a single
+ * file (or `null` if the user hasn't attached one for that type). Uploaded to
+ * GCS after the on-chain tx + collateral record are created.
+ */
+export type PendingDocuments = Partial<Record<DocumentTypeKey, File>>
+
+/** Metadata for each document slot shown in the form. */
+export const DOCUMENT_SLOTS: {
+  key: DocumentTypeKey
+  label: string
+  description: string
+}[] = [
+  {
+    key: "SHIPPING_CONTRACT",
+    label: "Shipping Contract",
+    description: "Contract between shipper and carrier",
+  },
+  {
+    key: "BILL_OF_LADING",
+    label: "Bill of Lading",
+    description: "Receipt for cargo and title document",
+  },
+  {
+    key: "PROOF_OF_DELIVERY",
+    label: "Proof of Delivery",
+    description: "Confirmation that goods were delivered",
+  },
+  {
+    key: "COMMERCIAL_INVOICE",
+    label: "Commercial Invoice",
+    description: "Invoice for the goods shipped",
+  },
+]
+
 export const issueCollateralSchema = z.object({
   name: z.string().min(1, { message: "Token name is required" }),
   symbol: z
@@ -44,6 +86,11 @@ export const issueCollateralSchema = z.object({
     .string()
     .max(500, { message: "Description must be at most 500 characters" })
     .optional(),
+  /**
+   * Optional supporting documents (invoices, bills of lading, etc.).
+   * Not validated by Zod — managed outside the form state because
+   * `File` objects can't be serialised by zodResolver.
+   */
 })
 
 export type IssueCollateralValues = z.infer<typeof issueCollateralSchema>

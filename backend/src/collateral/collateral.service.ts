@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   HttpStatus,
   Injectable,
   Logger,
@@ -19,6 +20,7 @@ import {
   UpdateCollateralDTO,
   CollateralStatusEnum,
   DocumentTypeEnum,
+  RequestUploadDTO,
 } from './collateral.dto';
 import {
   CollateralStatus,
@@ -64,20 +66,26 @@ export class CollateralService {
         );
       }
 
-      // Check for duplicate rwaId
-      const existing = await this.collateralRepository.findByRwaId(
-        payload.rwaId,
-      );
-      if (existing) {
-        throw new ConflictException(
-          `Collateral with RWA ID "${payload.rwaId}" already exists`,
-        );
+      // The RWA/token id can be supplied by the client (to reuse an existing
+      // id) or generated here so the record exists before the on-chain
+      // `create_rwa_token` — the caller then passes the returned `rwaId` as the
+      // token id so the DB record and the on-chain token stay in sync.
+      const rwaId = payload.rwaId ?? generateCustomId('tkn');
+
+      // Only a client-supplied id can collide; a freshly generated one cannot.
+      if (payload.rwaId) {
+        const existing = await this.collateralRepository.findByRwaId(rwaId);
+        if (existing) {
+          throw new ConflictException(
+            `Collateral with RWA ID "${rwaId}" already exists`,
+          );
+        }
       }
 
       const collateral = await this.collateralRepository.create({
         id: generateCustomId('col'),
         user: { connect: { id: userId } },
-        rwaId: payload.rwaId,
+        rwaId,
         tokenAddress: payload.tokenAddress ?? null,
         status: CollateralStatus.DRAFT,
         collateralData: payload.collateralData as Prisma.InputJsonValue,
@@ -218,6 +226,75 @@ export class CollateralService {
       };
     } catch (error) {
       this.logger.error('Error in uploadDocument', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Two-step upload (presigned URL):
+   * 1. Browser sends metadata + SHA-256 hash. We pre-create the
+   *    `CollateralDocument` row with the deterministic GCS key and
+   *    return a short-lived signed PUT URL.
+   * 2. Browser `PUT`s the file bytes directly to GCS.
+   *
+   * If the browser never completes step 2, the row remains as orphan
+   * metadata (downloads will 404). Acceptable for now; cleanup later.
+   */
+  async requestDocumentUpload(
+    id: string,
+    payload: RequestUploadDTO,
+  ): Promise<SuccessResponseDTO> {
+    try {
+      const collateral = await this.collateralRepository.findById(id);
+      if (!collateral) throw new NotFoundException('Collateral not found');
+
+      // 25 MB cap — match the old FileInterceptor limit.
+      const MAX_SIZE = 25 * 1024 * 1024;
+      if (payload.fileSize > MAX_SIZE) {
+        throw new BadRequestException(`File too large (max ${MAX_SIZE} bytes)`);
+      }
+
+      const documentId = generateCustomId('doc');
+      const key = this.storage.buildKeyPublic(id, documentId, payload.fileName);
+      const gcsUri = `gs://${this.storage.bucket}/${key}`;
+
+      const doc = await this.collateralRepository.createDocument({
+        id: documentId,
+        collateral: { connect: { id } },
+        documentType: this.mapDocumentType(payload.documentType),
+        gcsUri,
+        gcsKey: key,
+        fileName: payload.fileName,
+        mimeType: payload.contentType,
+        fileHash: payload.fileHash,
+        fileSize: payload.fileSize,
+      });
+
+      const expiresInSeconds = 900; // 15 min
+      const uploadUrl = await this.storage.getSignedUploadUrl(
+        key,
+        payload.contentType,
+        expiresInSeconds,
+      );
+
+      return {
+        success: true,
+        message: 'Upload URL generated',
+        data: {
+          id: doc.id,
+          documentType: doc.documentType,
+          fileName: doc.fileName,
+          fileHash: doc.fileHash,
+          gcsUri: doc.gcsUri,
+          uploadUrl,
+          expiresAt: new Date(
+            Date.now() + expiresInSeconds * 1000,
+          ).toISOString(),
+        },
+        statusCode: HttpStatus.CREATED,
+      };
+    } catch (error) {
+      this.logger.error('Error in requestDocumentUpload', error);
       throw error;
     }
   }
