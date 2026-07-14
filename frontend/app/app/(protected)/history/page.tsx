@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query"
 import Link from "next/link"
 import { useSession } from "next-auth/react"
-import { Receipt } from "@phosphor-icons/react/dist/ssr"
+import { ArrowSquareOut, Receipt } from "@phosphor-icons/react/dist/ssr"
 
 import { Badge } from "@/components/ui/badge"
 import {
@@ -70,7 +70,7 @@ export default function HistoryPage() {
 
   return (
     <div className="flex flex-col gap-6 py-6">
-      <div className="flex w-full max-w-2xl flex-col gap-4 text-sm">
+      <div className="flex w-full flex-col gap-4 text-sm">
         <div>
           <h1 className="text-lg font-medium">History</h1>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -94,11 +94,15 @@ export default function HistoryPage() {
         ) : (
           <div className="flex flex-col gap-1.5">
             {events.map((ev: TransactionEvent) => (
-              <Link
+              <div
                 key={ev.id}
-                href={`/app/collateral/${encodeURIComponent(ev.rwaId)}`}
-                className="flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-muted/40"
+                className="relative flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-muted/40"
               >
+                <Link
+                  href={`/app/collateral/${encodeURIComponent(ev.rwaId)}`}
+                  aria-label="View collateral"
+                  className="absolute inset-0 rounded-lg"
+                />
                 <div className="flex items-center gap-3">
                   <Badge variant="outline">
                     {EVENT_LABELS[ev.eventType] ?? ev.eventType}
@@ -134,8 +138,20 @@ export default function HistoryPage() {
                   )}
                   <span>L{ev.ledger}</span>
                   <span>{formatTime(ev.createdAt)}</span>
+                  {ev.txHash && (
+                    <a
+                      href={`https://stellar.expert/explorer/testnet/tx/${ev.txHash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={`View tx ${ev.txHash} on Stellar Expert`}
+                      className="relative z-10 flex items-center gap-1 rounded-md border px-2 py-1 font-mono text-primary transition-colors hover:bg-muted"
+                    >
+                      {ev.txHash.slice(0, 6)}…
+                      <ArrowSquareOut size={12} />
+                    </a>
+                  )}
                 </div>
-              </Link>
+              </div>
             ))}
           </div>
         )}
