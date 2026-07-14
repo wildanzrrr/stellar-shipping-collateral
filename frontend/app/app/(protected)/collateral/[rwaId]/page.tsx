@@ -71,6 +71,30 @@ function formatBps(bps: string | number): string {
   return `${(n / 100).toFixed(1)}%`
 }
 
+/**
+ * Render an on-chain due ledger in human terms — a calendar date plus a
+ * relative "in N days". `dueDate` is the backend's approximation of when the
+ * ledger closes; we fall back to the raw ledger only if it's unavailable.
+ */
+function formatDueDate(
+  iso: string | null | undefined,
+  fallbackLedger: number
+): string {
+  if (!iso) return `Ledger ${fallbackLedger}`
+  const due = new Date(iso)
+  if (isNaN(due.getTime())) return `Ledger ${fallbackLedger}`
+  const dateStr = due.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })
+  const days = Math.round((due.getTime() - Date.now()) / 86_400_000)
+  if (days > 1) return `${dateStr} · in ${days} days`
+  if (days === 1) return `${dateStr} · in 1 day`
+  if (days === 0) return `${dateStr} · due today`
+  return `${dateStr} · overdue`
+}
+
 /** Convert human USDC (e.g. "20.5") to base units string ("205000000"). */
 function toBaseUnits(human: string): string {
   const n = Number(human)
@@ -447,7 +471,10 @@ export default function CollateralDetailPage() {
               label="Protocol Fee"
               value={formatBps(rwa.protocolFeeBps)}
             />
-            <DetailItem label="Due Ledger" value={String(rwa.dueLedger)} />
+            <DetailItem
+              label="Due"
+              value={formatDueDate(rwa.dueDate, rwa.dueLedger)}
+            />
           </div>
         )}
 

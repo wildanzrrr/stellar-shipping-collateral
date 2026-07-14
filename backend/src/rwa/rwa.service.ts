@@ -71,6 +71,10 @@ export class RwaService {
       // Parse the on-chain RWA struct
       const rwaData = this.parseRwaStruct(rwa);
 
+      // Resolve the due ledger to an approximate calendar date so the UI can
+      // show "due in N days" instead of a raw ledger number users don't grok.
+      const dueDate = await this.dueLedgerToDate(rwaData.dueLedger as number);
+
       // Join with local collateral
       const collateral = await this.collateralRepository.findByRwaId(rwaId);
       const events = await this.rwaRepository.findEventsByRwaId(rwaId);
@@ -80,6 +84,7 @@ export class RwaService {
         message: 'RWA retrieved successfully',
         data: {
           ...rwaData,
+          dueDate,
           collateral: collateral ?? null,
           events,
         },
@@ -114,23 +119,25 @@ export class RwaService {
       const simulated = await tx.simulate();
       const rwas = simulated.result as unknown as RWA[];
 
-      // Filter by shipper (their issued RWAs) or investor (their holdings).
+      // Filter by shipper (their issued RWAs) or investor. The investor list
+      // ("My investment") includes every offering they have *ever* bought into
+      // — even fully-claimed positions (holding now 0) remain in the on-chain
+      // investors map, so we match on presence rather than a positive balance.
       let filtered = shipperAddress
         ? rwas.filter((r) => r.shipper === shipperAddress)
         : rwas;
       if (investorAddress) {
-        filtered = filtered.filter(
-          (r) => this.investorHolding(r, investorAddress) > 0n,
+        filtered = filtered.filter((r) =>
+          this.investorHasEntry(r, investorAddress),
         );
       }
 
-      // Paginate
-      const start = (page - 1) * limit;
-      const items = filtered.slice(start, start + limit);
-
-      // For each RWA, find local collateral
-      const enriched = await Promise.all(
-        items.map(async (r) => {
+      // Enrich every match with its local collateral, then sort newest-first by
+      // the collateral's createdAt before paginating. RWAs live in an on-chain
+      // map keyed by id (not creation order), so createdAt is the only reliable
+      // chronological signal. Offerings without a local record sort last.
+      const enrichedAll = await Promise.all(
+        filtered.map(async (r) => {
           const collateral = await this.collateralRepository.findByRwaId(r.id);
           return {
             id: r.id,
@@ -143,6 +150,9 @@ export class RwaService {
             sharesTotal: r.shares_total.toString(),
             dueLedger: Number(r.due_ledger),
             collateral: collateral ?? null,
+            createdAt: collateral?.createdAt
+              ? new Date(collateral.createdAt).toISOString()
+              : null,
             myShares: investorAddress
               ? this.investorHolding(r, investorAddress).toString()
               : undefined,
@@ -150,10 +160,20 @@ export class RwaService {
         }),
       );
 
+      enrichedAll.sort((a, b) => {
+        const ta = a.createdAt ? Date.parse(a.createdAt) : 0;
+        const tb = b.createdAt ? Date.parse(b.createdAt) : 0;
+        return tb - ta;
+      });
+
+      // Paginate the sorted list.
+      const start = (page - 1) * limit;
+      const items = enrichedAll.slice(start, start + limit);
+
       return {
         success: true,
         message: 'RWA list retrieved successfully',
-        data: { items: enriched, total: filtered.length, page, limit },
+        data: { items, total: filtered.length, page, limit },
         statusCode: HttpStatus.OK,
       };
     } catch (error) {
@@ -697,6 +717,33 @@ export class RwaService {
       if (addr === address) return shares;
     }
     return 0n;
+  }
+
+  /**
+   * True when the address appears in the RWA's on-chain investors map at all —
+   * including a fully-claimed position whose balance is now 0. Used by the
+   * "My investment" list so bought-then-claimed offerings still show up.
+   */
+  private investorHasEntry(rwa: RWA, address: string): boolean {
+    return this.investorEntries(rwa).some(([addr]) => addr === address);
+  }
+
+  /**
+   * Approximate the calendar date a future ledger will close at. Stellar
+   * ledgers close roughly every 5 seconds, so we project from the current
+   * ledger. Returns null if the current ledger can't be resolved.
+   */
+  private async dueLedgerToDate(dueLedger: number): Promise<string | null> {
+    if (!dueLedger || Number.isNaN(dueLedger)) return null;
+    try {
+      const current = await this.blockchain.getLatestLedger();
+      const LEDGER_CLOSE_SECONDS = 5;
+      const secondsUntilDue = (dueLedger - current) * LEDGER_CLOSE_SECONDS;
+      return new Date(Date.now() + secondsUntilDue * 1000).toISOString();
+    } catch (error) {
+      this.logger.warn('Could not resolve current ledger for due date', error);
+      return null;
+    }
   }
 
   private parseRwaStruct(rwa: RWA): Record<string, unknown> {

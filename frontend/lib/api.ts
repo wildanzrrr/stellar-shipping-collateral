@@ -328,11 +328,15 @@ export interface RwaSummary {
   sharesTotal: string
   dueLedger: number
   collateral: CollateralRecord | null
+  /** Local collateral createdAt (ISO) — lists are sorted newest-first by this. */
+  createdAt?: string | null
   /** Investor's own holding (token base units) — only set for the `mine` list. */
   myShares?: string
 }
 
 export interface RwaDetail extends RwaSummary {
+  /** Approximate calendar date (ISO) the due ledger closes at — for "due in N days". */
+  dueDate?: string | null
   interestPool: string
   principalPool: string
   protocolFeeBps: number
