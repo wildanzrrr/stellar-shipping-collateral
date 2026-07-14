@@ -66,7 +66,7 @@ export default function ProfilePage() {
 
   return (
     <div className="flex flex-col gap-6 py-6">
-      <div className="max-w-2xl">
+      <div className="w-full">
         <h1 className="text-lg font-medium">Profile</h1>
 
         {/* Account card */}

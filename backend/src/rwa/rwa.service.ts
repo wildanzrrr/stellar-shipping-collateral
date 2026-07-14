@@ -636,28 +636,43 @@ export class RwaService {
   async listEvents(
     userId: string,
     isShipper: boolean,
-    shipperRwaIds?: string[],
-    investorAddress?: string,
+    walletAddress?: string,
   ): Promise<SuccessResponseDTO> {
     try {
+      this.logger.debug('Listing transaction events', {
+        userId,
+        isShipper,
+        walletAddress,
+      });
+
       let events: any[] = [];
 
-      if (isShipper && shipperRwaIds && shipperRwaIds.length > 0) {
-        events = await this.rwaRepository.findEventsByShipper(shipperRwaIds);
-      }
-      if (investorAddress) {
-        const investorEvents =
-          await this.rwaRepository.findEventsByInvestor(investorAddress);
-        events = [...events, ...investorEvents];
+      if (isShipper) {
+        // A shipping company's history is every event on the RWAs it issued —
+        // creations, share purchases, fund collection, settlement, claims.
+        if (walletAddress) {
+          const rwaIds = await this.shipperRwaIds(walletAddress);
+          if (rwaIds.length > 0) {
+            events = await this.rwaRepository.findEventsByShipper(rwaIds);
+          }
+        }
+      } else if (walletAddress) {
+        // An investor's history is every event tied to their own wallet.
+        events = await this.rwaRepository.findEventsByInvestor(walletAddress);
       }
 
-      // Deduplicate by id
+      // Deduplicate by id, then order newest-first.
       const seen = new Set<string>();
-      const unique = events.filter((e) => {
-        if (seen.has(e.id)) return false;
-        seen.add(e.id);
-        return true;
-      });
+      const unique = events
+        .filter((e) => {
+          if (seen.has(e.id)) return false;
+          seen.add(e.id);
+          return true;
+        })
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        );
 
       return {
         success: true,
@@ -669,6 +684,14 @@ export class RwaService {
       this.logger.error('Error in listEvents', error);
       throw error;
     }
+  }
+
+  /** The ids of every RWA issued by a given shipper wallet. */
+  private async shipperRwaIds(shipperAddress: string): Promise<string[]> {
+    const tx = await this.blockchain.factory.list_rwas();
+    const simulated = await tx.simulate();
+    const rwas = simulated.result as unknown as RWA[];
+    return rwas.filter((r) => r.shipper === shipperAddress).map((r) => r.id);
   }
 
   // ─── helpers ──────────────────────────────────────────────────────────

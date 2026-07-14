@@ -60,7 +60,6 @@ export class RwaController {
     return this.rwaService.listEvents(
       req.user.sub,
       isShipper,
-      undefined, // shipperRwaIds — populated in a richer version
       req.user.walletAddress,
     );
   }

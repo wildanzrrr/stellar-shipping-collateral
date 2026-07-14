@@ -17,6 +17,8 @@ import {
   DownloadSimple,
   Warning,
   ArrowSquareOut,
+  Copy,
+  Check,
 } from "@phosphor-icons/react/dist/ssr"
 
 import { Button } from "@/components/ui/button"
@@ -380,16 +382,19 @@ export default function CollateralDetailPage() {
             </Badge>
           </div>
           {rwa?.token && (
-            <a
-              href={`https://stellar.expert/explorer/testnet/contract/${rwa.token}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={rwa.token}
-              className="flex items-center gap-1 font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
-            >
-              {rwa.token.slice(0, 12)}…
-              <ArrowSquareOut size={12} />
-            </a>
+            <div className="flex items-center gap-1">
+              <a
+                href={`https://stellar.expert/explorer/testnet/contract/${rwa.token}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={rwa.token}
+                className="flex items-center gap-1 font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
+              >
+                {rwa.token.slice(0, 12)}…
+                <ArrowSquareOut size={12} />
+              </a>
+              <CopyButton value={rwa.token} label="Token contract" />
+            </div>
           )}
         </div>
 
@@ -716,16 +721,21 @@ export default function CollateralDetailPage() {
               <Badge>{collateral.status}</Badge>
             </div>
             <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
-              <div>
+              <div className="flex items-center gap-1">
                 <span className="text-muted-foreground">ID: </span>
                 <code className="font-mono">{collateral.id}</code>
+                <CopyButton value={collateral.id} label="Collateral ID" />
               </div>
               {collateral.tokenAddress && (
-                <div>
+                <div className="flex items-center gap-1">
                   <span className="text-muted-foreground">Token: </span>
                   <code className="font-mono">
                     {collateral.tokenAddress.slice(0, 16)}…
                   </code>
+                  <CopyButton
+                    value={collateral.tokenAddress}
+                    label="Token address"
+                  />
                 </div>
               )}
             </div>
@@ -855,5 +865,32 @@ function DetailItem({ label, value }: { label: string; value: string }) {
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className="text-sm font-medium">{value}</span>
     </div>
+  )
+}
+
+/** Icon button that copies `value` to the clipboard, matching the wallet copy UX. */
+function CopyButton({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(true)
+      toast.success(`${label} copied to clipboard`)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      toast.error(`Failed to copy ${label.toLowerCase()}`)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="inline-flex cursor-pointer items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      aria-label={`Copy ${label.toLowerCase()}`}
+    >
+      {copied ? <Check size={12} /> : <Copy size={12} />}
+    </button>
   )
 }
