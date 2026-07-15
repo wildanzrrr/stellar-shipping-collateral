@@ -36,13 +36,10 @@ services:
       dockerfile: Dockerfile
     container_name: sep57-backend
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
-      # Container reaches Postgres by its compose service name on the internal
-      # network. This overrides DATABASE_URL from .env (env_file), so .env can
-      # stay host-oriented (localhost:5433) for Prisma CLI / Studio without
-      # breaking the container.
-      - DATABASE_URL=postgresql://sep57_user:sep57_secure_password@postgres:5432/sep57?schema=public
     deploy:
       resources:
         limits:
@@ -65,8 +62,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    env_file:
-      - .env
     ports:
       - '${PORT:-2000}:2000'
     networks:

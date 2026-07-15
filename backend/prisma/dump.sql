@@ -2,13 +2,14 @@
 -- PostgreSQL database dump
 --
 
--- Dumped from database version 17.10
--- Dumped by pg_dump version 17.4
+\restrict 1TzZHqac9cRyXU3MIJLEtabuKLNWyYPav36lqsZfB9gxAnFgQtlEPBN1u7UG6RK
+
+-- Dumped from database version 16.14
+-- Dumped by pg_dump version 16.14
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
-SET transaction_timeout = 0;
 SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 SELECT pg_catalog.set_config('search_path', '', false);
@@ -83,14 +84,6 @@ DROP TYPE IF EXISTS public."KycStatus";
 DROP TYPE IF EXISTS public."KybStatus";
 DROP TYPE IF EXISTS public."DocumentType";
 DROP TYPE IF EXISTS public."CollateralStatus";
--- *not* dropping schema, since initdb creates it
---
--- Name: public; Type: SCHEMA; Schema: -; Owner: -
---
-
--- *not* creating schema, since initdb creates it
-
-
 --
 -- Name: CollateralStatus; Type: TYPE; Schema: public; Owner: -
 --
@@ -364,6 +357,7 @@ INSERT INTO public."BusinessProfile" VALUES ('cmri0apa10000kn9kclxk6290', 'usr-o
 -- Data for Name: EventListenerCursor; Type: TABLE DATA; Schema: public; Owner: -
 --
 
+INSERT INTO public."EventListenerCursor" VALUES ('cur-dd8nm2ctsz2nern482mv6a52e', 'CBUNBDBR37C4JDBVUK6EYSLFGNFSA54JREJ7L3X3NTXGWY3OV5JTL5HI', 3619771, NULL, '2026-07-15 11:39:38.282');
 
 
 --
@@ -788,4 +782,6 @@ ALTER TABLE ONLY public."Wallet"
 --
 -- PostgreSQL database dump complete
 --
+
+\unrestrict 1TzZHqac9cRyXU3MIJLEtabuKLNWyYPav36lqsZfB9gxAnFgQtlEPBN1u7UG6RK
 
