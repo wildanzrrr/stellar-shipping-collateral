@@ -1,7 +1,9 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { json, raw } from 'express';
 
 async function bootstrap() {
   const logger = new Logger('MAIN');
@@ -18,6 +20,16 @@ async function bootstrap() {
     'DFNS_SERVICE_ACCOUNT_CRED_ID',
     'JWT_ACCESS_SECRET',
     'JWT_REFRESH_SECRET',
+    // Sumsub KYC
+    'SUMSUB_APP_TOKEN',
+    'SUMSUB_SECRET_KEY',
+    'SUMSUB_WEBHOOK_SECRET',
+    'SUMSUB_BASE_URL',
+    'SUMSUB_KYC_LEVEL_NAME',
+    // Sumsub KYB (business verification for SHIPPING_COMPANY users)
+    'SUMSUB_KYB_LEVEL_NAME',
+    // Stellar admin wallet (signs on-chain set_identity transactions)
+    'ADMIN_SECRET',
   ];
 
   const missingEnvVars = requiredEnvVars.filter(
@@ -31,13 +43,28 @@ async function bootstrap() {
     process.exit(1);
   }
 
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true,
     logger:
       NODE_ENV === 'production'
         ? ['error', 'warn', 'log']
         : ['debug', 'error', 'warn', 'log', 'verbose'],
   });
+
+  // Raw body capture for Sumsub webhook HMAC verification.
+  // We capture the raw bytes for the webhook route before Express parses JSON,
+  // then re-parse for all other routes.
+  app.use('/api/v1/sumsub/webhook', raw({ type: '*/*' }), (req, _res, next) => {
+    (req as any).rawBody = req.body;
+    // Parse JSON manually so the controller can still read req.body
+    try {
+      req.body = JSON.parse((req as any).rawBody.toString('utf8'));
+    } catch {
+      // leave raw body as-is
+    }
+    next();
+  });
+  app.use(json());
 
   // CORS Option
   const options = {

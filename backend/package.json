@@ -6,6 +6,7 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
+    "setup": "cd src/packages/compliance && pnpm i --save-dev @types/node && cd ../factory && pnpm i --save-dev @types/node && cd ../identity_verifier && pnpm i --save-dev @types/node && cd ../sep57 && pnpm i --save-dev @types/node",
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",

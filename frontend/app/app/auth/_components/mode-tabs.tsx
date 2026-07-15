@@ -1,5 +1,6 @@
 "use client"
 
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { Mode } from "./types"
 
 const TABS: { value: Mode; label: string }[] = [
@@ -15,21 +16,14 @@ export function ModeTabs({
   onChange: (mode: Mode) => void
 }) {
   return (
-    <div className="flex rounded-lg border p-1 text-sm">
-      {TABS.map((tab) => (
-        <button
-          key={tab.value}
-          type="button"
-          onClick={() => onChange(tab.value)}
-          className={`flex-1 rounded-md px-3 py-1.5 ${
-            value === tab.value
-              ? "bg-muted font-medium"
-              : "text-muted-foreground"
-          }`}
-        >
-          {tab.label}
-        </button>
-      ))}
-    </div>
+    <Tabs value={value} onValueChange={(v) => onChange(v as Mode)}>
+      <TabsList>
+        {TABS.map((tab) => (
+          <TabsTrigger key={tab.value} value={tab.value}>
+            {tab.label}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
   )
 }

@@ -1,15 +1,30 @@
-/* eslint-disable @typescript-eslint/no-redundant-type-constituents */
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from 'src/prisma.service';
 import { generateCustomId } from 'src/utils/utils';
-import { Prisma, User, UserRole } from 'prisma/generated/prisma/client';
+import {
+  Prisma,
+  User,
+  UserRole,
+  InvestmentProfile,
+  BusinessProfile,
+} from 'prisma/generated/prisma/client';
+
+/** User with wallet + signSession + investment/business profile relations included. */
+export type UserWithRelations = Prisma.UserGetPayload<{
+  include: {
+    wallet: true;
+    signSession: true;
+    investmentProfile: true;
+    businessProfile: true;
+  };
+}>;
 
 @Injectable()
 export class UsersRepository {
   private readonly logger = new Logger(UsersRepository.name);
   constructor(private readonly prisma: PrismaService) {}
 
-  async get(payload: Prisma.UserWhereInput): Promise<User | null> {
+  async get(payload: Prisma.UserWhereInput): Promise<UserWithRelations | null> {
     this.logger.debug('Getting user with payload,', payload);
     try {
       return await this.prisma.user.findFirst({
@@ -17,6 +32,8 @@ export class UsersRepository {
         include: {
           wallet: true,
           signSession: true,
+          investmentProfile: true,
+          businessProfile: true,
         },
       });
     } catch (error) {
@@ -25,7 +42,7 @@ export class UsersRepository {
     }
   }
 
-  async getByUsername(username: string): Promise<User | null> {
+  async getByUsername(username: string): Promise<UserWithRelations | null> {
     this.logger.debug('Getting user by username,', username);
     try {
       return await this.prisma.user.findFirst({
@@ -35,6 +52,9 @@ export class UsersRepository {
         },
         include: {
           wallet: true,
+          signSession: true,
+          investmentProfile: true,
+          businessProfile: true,
         },
       });
     } catch (error) {
@@ -43,7 +63,7 @@ export class UsersRepository {
     }
   }
 
-  async getByEmail(email: string): Promise<User | null> {
+  async getByEmail(email: string): Promise<UserWithRelations | null> {
     this.logger.debug('Getting user by email,', email);
     try {
       return await this.prisma.user.findFirst({
@@ -53,6 +73,9 @@ export class UsersRepository {
         },
         include: {
           wallet: true,
+          signSession: true,
+          investmentProfile: true,
+          businessProfile: true,
         },
       });
     } catch (error) {
@@ -124,6 +147,74 @@ export class UsersRepository {
       });
     } catch (error) {
       this.logger.error('Error in delete', error);
+      throw error;
+    }
+  }
+
+  // --- Investment Profile ---
+
+  /** Upsert the investment profile for a user (1:1 relation). */
+  async upsertInvestmentProfile(
+    userId: string,
+    answers: Record<string, string | string[]>,
+  ): Promise<InvestmentProfile> {
+    this.logger.debug('Upserting investment profile for user,', userId);
+    try {
+      return await this.prisma.investmentProfile.upsert({
+        where: { userId },
+        create: { userId, answers },
+        update: { answers },
+      });
+    } catch (error) {
+      this.logger.error('Error in upsertInvestmentProfile', error);
+      throw error;
+    }
+  }
+
+  /** Get the investment profile for a user, if it exists. */
+  async getInvestmentProfile(
+    userId: string,
+  ): Promise<InvestmentProfile | null> {
+    this.logger.debug('Getting investment profile for user,', userId);
+    try {
+      return await this.prisma.investmentProfile.findUnique({
+        where: { userId },
+      });
+    } catch (error) {
+      this.logger.error('Error in getInvestmentProfile', error);
+      throw error;
+    }
+  }
+
+  // --- Business Profile ---
+
+  /** Upsert the business profile for a user (1:1 relation). */
+  async upsertBusinessProfile(
+    userId: string,
+    answers: Record<string, string | string[]>,
+  ): Promise<BusinessProfile> {
+    this.logger.debug('Upserting business profile for user,', userId);
+    try {
+      return await this.prisma.businessProfile.upsert({
+        where: { userId },
+        create: { userId, answers },
+        update: { answers },
+      });
+    } catch (error) {
+      this.logger.error('Error in upsertBusinessProfile', error);
+      throw error;
+    }
+  }
+
+  /** Get the business profile for a user, if it exists. */
+  async getBusinessProfile(userId: string): Promise<BusinessProfile | null> {
+    this.logger.debug('Getting business profile for user,', userId);
+    try {
+      return await this.prisma.businessProfile.findUnique({
+        where: { userId },
+      });
+    } catch (error) {
+      this.logger.error('Error in getBusinessProfile', error);
       throw error;
     }
   }

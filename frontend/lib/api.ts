@@ -48,14 +48,47 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   SHIPPING_COMPANY: "Shipping Company",
 }
 
+export type KycStatus =
+  "NOT_STARTED" | "INIT" | "PENDING" | "COMPLETED" | "REJECTED" | "ON_HOLD"
+
+export const KYC_STATUS_LABELS: Record<KycStatus, string> = {
+  NOT_STARTED: "Not started",
+  INIT: "In progress",
+  PENDING: "Pending review",
+  COMPLETED: "Verified",
+  REJECTED: "Rejected",
+  ON_HOLD: "On hold",
+}
+
+export type KybStatus =
+  "NOT_STARTED" | "INIT" | "PENDING" | "COMPLETED" | "REJECTED" | "ON_HOLD"
+
+export const KYB_STATUS_LABELS: Record<KybStatus, string> = {
+  NOT_STARTED: "Not started",
+  INIT: "In progress",
+  PENDING: "Pending review",
+  COMPLETED: "Verified",
+  REJECTED: "Rejected",
+  ON_HOLD: "On hold",
+}
+
+export type QuestionnaireAnswers = Record<string, string | string[]>
+
 export interface PublicUser {
   id: string
   email: string
   role: UserRole
+  kycStatus: KycStatus
+  kybStatus: KybStatus
   firstName?: string | null
   lastName?: string | null
   walletId?: string | null
   walletAddress?: string | null
+  companyName?: string | null
+  companyRegistrationNumber?: string | null
+  companyCountry?: string | null
+  investmentProfile?: QuestionnaireAnswers | null
+  businessProfile?: QuestionnaireAnswers | null
 }
 
 export interface AuthResult {
@@ -71,11 +104,7 @@ export interface RegistrationChallenge {
   [key: string]: unknown
 }
 
-export interface AlreadyRegistered {
-  alreadyRegistered: true
-}
-
-export type RegisterInitResult = RegistrationChallenge | AlreadyRegistered
+export type RegisterInitResult = RegistrationChallenge
 
 export interface LoginChallenge {
   challengeIdentifier: string
@@ -138,6 +167,21 @@ export const authApi = {
     }),
   me: (accessToken: string) =>
     req<PublicUser>("/auth/me", { headers: bearer(accessToken) }),
+  submitQuestionnaire: (accessToken: string, answers: QuestionnaireAnswers) =>
+    req<{ answers: QuestionnaireAnswers }>("/auth/questionnaire", {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify({ answers }),
+    }),
+  submitBusinessQuestionnaire: (
+    accessToken: string,
+    answers: QuestionnaireAnswers
+  ) =>
+    req<{ answers: QuestionnaireAnswers }>("/auth/business-questionnaire", {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify({ answers }),
+    }),
 }
 
 // ---- wallets (protected — pass the session access token) ----
@@ -159,7 +203,7 @@ export const walletApi = {
     accessToken: string,
     username: string,
     walletId: string,
-    message: string,
+    message: string
   ) =>
     req<SignChallenge>(`/wallets/${walletId}/sign/init`, {
       method: "POST",
@@ -173,16 +217,79 @@ export const walletApi = {
       walletId: string
       challengeIdentifier: string
       firstFactor: unknown
-    },
+    }
   ) =>
     req<SignResult>(`/wallets/${args.walletId}/sign/complete`, {
       method: "POST",
       headers: bearer(accessToken),
-      // walletId travels in the URL — keep it out of the body (whitelist).
       body: JSON.stringify({
         username: args.username,
         challengeIdentifier: args.challengeIdentifier,
         firstFactor: args.firstFactor,
       }),
+    }),
+  transferInit: (
+    accessToken: string,
+    args: {
+      username: string
+      walletId: string
+      asset: "native" | "USDC"
+      destination: string
+      amount: number
+    }
+  ) =>
+    req<SignChallenge>(`/wallets/${args.walletId}/transfer/init`, {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify({
+        username: args.username,
+        asset: args.asset,
+        destination: args.destination,
+        amount: args.amount,
+      }),
+    }),
+  transferComplete: (
+    accessToken: string,
+    args: {
+      username: string
+      walletId: string
+      challengeIdentifier: string
+      firstFactor: unknown
+    }
+  ) =>
+    req<SignResult>(`/wallets/${args.walletId}/transfer/complete`, {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify({
+        username: args.username,
+        challengeIdentifier: args.challengeIdentifier,
+        firstFactor: args.firstFactor,
+      }),
+    }),
+}
+
+// ---- sumsub KYC (protected — pass the session access token) ----
+
+export interface SumsubAccessToken {
+  token: string
+  userId: string
+  applicantId?: string
+}
+
+export const sumsubApi = {
+  getAccessToken: (
+    accessToken: string,
+    sessionId?: string,
+    applicantId?: string
+  ) =>
+    req<SumsubAccessToken>("/sumsub/access-token", {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify({ sessionId, applicantId }),
+    }),
+  getKybAccessToken: (accessToken: string) =>
+    req<SumsubAccessToken>("/sumsub/kyb-access-token", {
+      method: "POST",
+      headers: bearer(accessToken),
     }),
 }

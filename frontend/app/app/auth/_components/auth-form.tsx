@@ -1,10 +1,21 @@
 "use client"
 
-import { useState } from "react"
+import { useForm, useWatch } from "react-hook-form"
+import { zodResolver } from "@hookform/resolvers/zod"
 
 import { Button } from "@/components/ui/button"
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form"
+import { Input } from "@/components/ui/input"
 import type { UserRole } from "@/lib/api"
 import { RoleSelect } from "./role-select"
+import { registerSchema, type RegisterValues } from "./schemas"
 import type { AuthFormValues, Mode } from "./types"
 
 export function AuthForm({
@@ -16,82 +27,118 @@ export function AuthForm({
   busy: boolean
   onSubmit: (values: AuthFormValues) => void
 }) {
-  const [email, setEmail] = useState("")
-  const [role, setRole] = useState<UserRole>("INVESTOR")
-  const [firstName, setFirstName] = useState("")
-  const [lastName, setLastName] = useState("")
+  const form = useForm<RegisterValues>({
+    resolver: zodResolver(registerSchema),
+    defaultValues: {
+      email: "",
+      role: "INVESTOR",
+      firstName: "",
+      lastName: "",
+    },
+  })
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    onSubmit({ email, role, firstName, lastName })
+  const watchedRole = useWatch({ control: form.control, name: "role" })
+  const emailPlaceholder =
+    watchedRole === "SHIPPING_COMPANY" ? "you@company.com" : "your@email.co"
+
+  function handleSubmit(values: RegisterValues) {
+    onSubmit({
+      email: values.email,
+      role: values.role as UserRole,
+      firstName: values.firstName ?? "",
+      lastName: values.lastName ?? "",
+    })
   }
 
   return (
-    <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
-      <div className="flex flex-col gap-1.5">
-        <label className="text-xs text-muted-foreground" htmlFor="email">
-          Email
-        </label>
-        <input
-          id="email"
-          type="email"
-          autoComplete="email"
-          required
-          className="rounded-md border bg-background px-3 py-2 text-sm"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="you@company.com"
-          autoFocus
+    <Form {...form}>
+      <form
+        className="flex flex-col gap-3"
+        onSubmit={form.handleSubmit(handleSubmit)}
+      >
+        {mode === "register" && (
+          <FormField
+            control={form.control}
+            name="role"
+            render={({ field }) => (
+              <FormItem>
+                <RoleSelect value={field.value} onChange={field.onChange} />
+              </FormItem>
+            )}
+          />
+        )}
+
+        <FormField
+          control={form.control}
+          name="email"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel htmlFor="email">Email</FormLabel>
+              <FormControl>
+                <Input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  placeholder={emailPlaceholder}
+                  autoFocus
+                  {...field}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </div>
 
-      {mode === "register" && (
-        <>
-          <RoleSelect value={role} onChange={setRole} />
+        {mode === "register" && (
           <div className="flex gap-2">
-            <div className="flex flex-1 flex-col gap-1.5">
-              <label
-                className="text-xs text-muted-foreground"
-                htmlFor="firstName"
-              >
-                First name
-              </label>
-              <input
-                id="firstName"
-                autoComplete="given-name"
-                className="rounded-md border bg-background px-3 py-2 text-sm"
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                placeholder="Alice"
-              />
-            </div>
-            <div className="flex flex-1 flex-col gap-1.5">
-              <label
-                className="text-xs text-muted-foreground"
-                htmlFor="lastName"
-              >
-                Last name
-              </label>
-              <input
-                id="lastName"
-                autoComplete="family-name"
-                className="rounded-md border bg-background px-3 py-2 text-sm"
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-                placeholder="Doe"
-              />
-            </div>
-          </div>
-        </>
-      )}
+            <FormField
+              control={form.control}
+              name="firstName"
+              render={({ field }) => (
+                <FormItem className="flex-1">
+                  <FormLabel htmlFor="firstName">First name</FormLabel>
+                  <FormControl>
+                    <Input
+                      id="firstName"
+                      autoComplete="given-name"
+                      placeholder="Alice"
+                      {...field}
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
 
-      <Button type="submit" disabled={busy || !email.trim()}>
-        {busy
-          ? "Working…"
-          : mode === "login"
-            ? "Sign in with passkey"
-            : "Create account"}
-      </Button>
-    </form>
+            <FormField
+              control={form.control}
+              name="lastName"
+              render={({ field }) => (
+                <FormItem className="flex-1">
+                  <FormLabel htmlFor="lastName">Last name</FormLabel>
+                  <FormControl>
+                    <Input
+                      id="lastName"
+                      autoComplete="family-name"
+                      placeholder="Doe"
+                      {...field}
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+          </div>
+        )}
+
+        <Button type="submit" disabled={busy}>
+          {busy ? (
+            <span className="auth-status__running">Working</span>
+          ) : mode === "login" ? (
+            "Sign in with passkey"
+          ) : (
+            "Create account"
+          )}
+        </Button>
+      </form>
+    </Form>
   )
 }

@@ -324,7 +324,7 @@ export default function Page() {
                   </div>
                   <div>
                     <dt>Face value</dt>
-                    <dd>1,000,000 $USDC</dd>
+                    <dd>15,000 $USDC</dd>
                   </div>
                   <div>
                     <dt>Terms</dt>
@@ -342,7 +342,7 @@ export default function Page() {
                 <div>
                   <p className="bk-token__id">BNKR-1023</p>
                   <p className="bk-token__meta">
-                    1,000,000 shares · 1 share = 1 $USDC · identity-gated
+                    15,000 shares · 1 share = 1 $USDC · identity-gated
                   </p>
                 </div>
               </div>

@@ -227,31 +227,7 @@
   white-space: nowrap;
 }
 
-/* Wordmark image — light/dark variants swap on the next-themes class. */
-.bk-logo {
-  display: inline-flex;
-  align-items: center;
-}
-
-.bk-logo img {
-  display: block;
-  height: 22px;
-  width: auto;
-}
-
-/* (0,2,0)+ selectors on purpose — must out-rank `.bk-logo img` (0,1,1),
-   which otherwise re-shows both variants at once. */
-.bk-logo .bk-logo__dark {
-  display: none;
-}
-
-.dark .bk-logo .bk-logo__light {
-  display: none;
-}
-
-.dark .bk-logo .bk-logo__dark {
-  display: block;
-}
+/* Wordmark styles now live in globals.css (shared with the app surface). */
 
 .bk-nav__center {
   display: none;
@@ -265,7 +241,9 @@
   font-weight: 500;
   padding: var(--bk-space-2xs) var(--bk-space-sm);
   border-radius: var(--bk-radius-btn);
-  transition: color var(--bk-dur-micro) var(--bk-ease-out), background-color var(--bk-dur-micro) var(--bk-ease-out);
+  transition:
+    color var(--bk-dur-micro) var(--bk-ease-out),
+    background-color var(--bk-dur-micro) var(--bk-ease-out);
 }
 
 .bk-nav__link:hover,
@@ -398,7 +376,9 @@
   position: relative;
   z-index: var(--bk-z-raised);
   width: calc(100% - var(--bk-space-xl));
-  margin-top: calc(-1 * var(--bk-space-2xl)); /* the one deliberate grid-break */
+  margin-top: calc(
+    -1 * var(--bk-space-2xl)
+  ); /* the one deliberate grid-break */
   margin-left: var(--bk-space-xl);
 }
 
@@ -1151,7 +1131,9 @@
 .bk-band__caption {
   position: absolute;
   left: var(--bk-gutter);
-  right: var(--bk-gutter); /* lets the chip wrap instead of overflowing at 320px */
+  right: var(
+    --bk-gutter
+  ); /* lets the chip wrap instead of overflowing at 320px */
   bottom: var(--bk-space-lg);
   z-index: var(--bk-z-raised);
 }

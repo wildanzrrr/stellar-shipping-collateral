@@ -28,26 +28,27 @@ export function useAuthFlow() {
 
   // DFNS login ceremony -> BE issues JWTs -> establish NextAuth session.
   async function completeLogin(email: string) {
-    setStatus("Requesting login challenge…")
+    setStatus("Requesting login challenge — please wait")
     const init = await authApi.loginInit(email)
 
-    setStatus("Sign in with your passkey…")
+    setStatus("Sign in with your passkey — please wait")
     const firstFactor = await webauthn.sign(
-      init as unknown as Parameters<typeof webauthn.sign>[0],
+      init as unknown as Parameters<typeof webauthn.sign>[0]
     )
 
-    setStatus("Verifying…")
+    setStatus("Verifying your passkey — do not close this page")
     const result = await authApi.loginComplete({
       email,
       challengeIdentifier: init.challengeIdentifier,
       firstFactor,
     })
 
-    setStatus("Starting your session…")
+    setStatus("Starting your session — do not close or refresh this page")
     const res = await signIn("dfns", {
       email: result.user.email,
       userId: result.user.id,
       role: result.user.role,
+      kycStatus: result.user.kycStatus,
       firstName: result.user.firstName ?? "",
       lastName: result.user.lastName ?? "",
       walletId: result.user.walletId ?? "",
@@ -67,7 +68,7 @@ export function useAuthFlow() {
   // Register: create the DFNS user + passkey, provision the wallet on the BE,
   // then complete the passkey login to mint tokens.
   async function registerFlow(input: RegisterInput) {
-    setStatus("Checking your account…")
+    setStatus("Checking your account — please wait")
     const regInit = await authApi.registerInit({
       email: input.email,
       role: input.role,
@@ -75,18 +76,12 @@ export function useAuthFlow() {
       lastName: input.lastName,
     })
 
-    if ("alreadyRegistered" in regInit) {
-      setStatus("Account exists — signing you in…")
-      await completeLogin(input.email)
-      return
-    }
-
-    setStatus("Create a passkey (Touch ID / security key)…")
+    setStatus("Create a passkey (Touch ID / security key) — please wait")
     const attestation = await webauthn.create(
-      regInit as unknown as Parameters<typeof webauthn.create>[0],
+      regInit as unknown as Parameters<typeof webauthn.create>[0]
     )
 
-    setStatus("Finishing registration…")
+    setStatus("Finishing registration — do not close this page")
     await authApi.registerComplete({
       email: input.email,
       temporaryAuthenticationToken: regInit.temporaryAuthenticationToken,

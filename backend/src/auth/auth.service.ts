@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   HttpStatus,
   Injectable,
   Logger,
@@ -10,6 +11,7 @@ import { JwtService } from '@nestjs/jwt';
 import { createHash } from 'crypto';
 import type { LoginBody, RegisterBody } from '@dfns/sdk/generated/auth';
 import { UsersRepository } from 'src/users/users.repository';
+import type { UserWithRelations } from 'src/users/users.repository';
 import { WalletsRepository } from 'src/wallets/wallets.repository';
 import { WalletsService } from 'src/wallets/wallets.service';
 import { DfnsService } from 'src/dfns/dfns.service';
@@ -20,6 +22,10 @@ import {
   RegisterCompleteDTO,
   LoginInitDTO,
   LoginCompleteDTO,
+} from './auth.dto';
+import {
+  SubmitQuestionnaireDTO,
+  SubmitBusinessQuestionnaireDTO,
 } from './auth.dto';
 import { AuthTokens, RefreshTokenPayload } from './jwt.types';
 
@@ -59,13 +65,9 @@ export class AuthService {
 
     const existing = await this.usersRepository.getByEmail(payload.email);
     if (existing?.dfnsUserId) {
-      // Already a full DFNS user — the FE should switch to the login flow.
-      return {
-        success: true,
-        message: 'User already registered',
-        data: { alreadyRegistered: true },
-        statusCode: HttpStatus.OK,
-      };
+      // Already a full DFNS user — reject the registration so the FE can
+      // notify the user and prompt them to log in instead.
+      throw new BadRequestException('Email already registered');
     }
 
     // Reuse an existing DFNS EndUser if one exists (BE restarts otherwise
@@ -105,12 +107,9 @@ export class AuthService {
     if (dfnsUserId) {
       await this.usersRepository.update(user.id, { dfnsUserId });
       await this.provisionWallet(user.id, payload.email);
-      return {
-        success: true,
-        message: 'User already registered',
-        data: { alreadyRegistered: true },
-        statusCode: HttpStatus.OK,
-      };
+      // A DFNS EndUser already exists for this email — reject so the FE
+      // surfaces an "email already registered" notification.
+      throw new BadRequestException('Email already registered');
     }
 
     const challenge =
@@ -261,6 +260,53 @@ export class AuthService {
     };
   }
 
+  // --- Investment questionnaire ---
+
+  async submitQuestionnaire(
+    userId: string,
+    payload: SubmitQuestionnaireDTO,
+  ): Promise<SuccessResponseDTO> {
+    this.logger.debug('Submit questionnaire', { userId });
+
+    // Verify the user exists.
+    const user = await this.usersRepository.get({ id: userId });
+    if (!user) throw new NotFoundException('User not found');
+
+    const profile = await this.usersRepository.upsertInvestmentProfile(
+      userId,
+      payload.answers,
+    );
+
+    return {
+      success: true,
+      message: 'Investment profile saved',
+      data: { answers: profile.answers },
+      statusCode: HttpStatus.OK,
+    };
+  }
+
+  async submitBusinessQuestionnaire(
+    userId: string,
+    payload: SubmitBusinessQuestionnaireDTO,
+  ): Promise<SuccessResponseDTO> {
+    this.logger.debug('Submit business questionnaire', { userId });
+
+    const user = await this.usersRepository.get({ id: userId });
+    if (!user) throw new NotFoundException('User not found');
+
+    const profile = await this.usersRepository.upsertBusinessProfile(
+      userId,
+      payload.answers,
+    );
+
+    return {
+      success: true,
+      message: 'Business profile saved',
+      data: { answers: profile.answers },
+      statusCode: HttpStatus.OK,
+    };
+  }
+
   async logout(userId: string): Promise<SuccessResponseDTO> {
     await this.usersRepository.update(userId, { refreshTokenHash: null });
     return {
@@ -310,6 +356,8 @@ export class AuthService {
       sub: user.id,
       email: user.email,
       role: user.role,
+      kycStatus: user.kycStatus,
+      kybStatus: user.kybStatus,
       walletId: wallet?.dfnsWalletId,
       walletAddress: wallet?.address,
     };
@@ -342,15 +390,26 @@ export class AuthService {
     return createHash('sha256').update(token).digest('hex');
   }
 
-  private publicUser(user: User, wallet: Wallet | null) {
+  private publicUser(user: UserWithRelations, wallet: Wallet | null) {
     return {
       id: user.id,
       email: user.email,
       role: user.role,
+      kycStatus: user.kycStatus,
+      kybStatus: user.kybStatus,
       firstName: user.firstName,
       lastName: user.lastName,
       walletId: wallet?.dfnsWalletId ?? null,
       walletAddress: wallet?.address ?? null,
+      companyName: user.companyName ?? null,
+      companyRegistrationNumber: user.companyRegistrationNumber ?? null,
+      companyCountry: user.companyCountry ?? null,
+      investmentProfile: user.investmentProfile
+        ? (user.investmentProfile.answers as Record<string, string | string[]>)
+        : null,
+      businessProfile: user.businessProfile
+        ? (user.businessProfile.answers as Record<string, string | string[]>)
+        : null,
     };
   }
 

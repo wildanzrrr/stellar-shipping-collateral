@@ -3,13 +3,17 @@ import {
   IsEmail,
   IsEnum,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
 } from 'class-validator';
 import { UserRole } from 'prisma/generated/prisma/client';
 
 export class RegisterInitDTO {
-  @ApiProperty({ description: 'User email (identity)', example: 'alice@acme.io' })
+  @ApiProperty({
+    description: 'User email (identity)',
+    example: 'alice@acme.io',
+  })
   @IsEmail()
   @IsNotEmpty()
   email: string;
@@ -78,4 +82,36 @@ export class RefreshDTO {
   @IsNotEmpty()
   @IsString()
   refreshToken: string;
+}
+
+export class SubmitQuestionnaireDTO {
+  @ApiProperty({
+    description:
+      'Questionnaire answers keyed by question id. Values are string (single-select) or string[] (multi-select).',
+    example: {
+      investor_type: 'individual',
+      asset_familiarity: ['crypto', 'rwa'],
+      risk_appetite: 'moderate',
+      understanding_platform: 'somewhat',
+      understanding_collateral: 'verified_documents',
+    },
+  })
+  @IsObject()
+  @IsNotEmpty()
+  answers: Record<string, string | string[]>;
+}
+
+export class SubmitBusinessQuestionnaireDTO {
+  @ApiProperty({
+    description:
+      'Business questionnaire answers keyed by question id. Values are string (single-select) or string[] (multi-select).',
+    example: {
+      business_type: 'freight_forwarder',
+      fleet_size: '1_10',
+      trade_routes: ['asia_europe', 'trans_pacific'],
+    },
+  })
+  @IsObject()
+  @IsNotEmpty()
+  answers: Record<string, string | string[]>;
 }

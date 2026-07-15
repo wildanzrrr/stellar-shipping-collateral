@@ -15,19 +15,67 @@ enum UserRole {
   SHIPPING_COMPANY
 }
 
+// KYC verification status — sourced from Sumsub webhook events.
+enum KycStatus {
+  NOT_STARTED // no applicant created yet
+  INIT // applicant created, verification not started
+  PENDING // documents uploaded, awaiting review
+  COMPLETED // verification passed (reviewAnswer = GREEN)
+  REJECTED // verification failed / resubmission requested (reviewAnswer = RED)
+  ON_HOLD // review paused
+}
+
+// KYB (business) verification status — sourced from Sumsub KYB webhook events.
+// Only applies to SHIPPING_COMPANY users; investors never enter this lifecycle.
+enum KybStatus {
+  NOT_STARTED // no KYB applicant created yet
+  INIT // applicant created, verification not started
+  PENDING // company data + documents submitted, awaiting automated checks
+  COMPLETED // automated registry + AML checks passed
+  REJECTED // registry check failed or AML match found
+  ON_HOLD // review paused (e.g. document re-upload requested)
+}
+
+// Investment profile answers collected before KYC verification.
+// Each user has at most one profile (1:1). Answers are stored as JSON
+// because the questionnaire structure is flexible (single + multi-select).
 model User {
-  id            String        @id @default(cuid())
-  username      String        @unique
-  email         String        @unique
-  firstName     String?
-  lastName      String?
-  role          UserRole      @default(INVESTOR)
-  dfnsUserId    String?       @unique
-  userAuthToken String?
+  id                String             @id @default(cuid())
+  username          String             @unique
+  email             String             @unique
+  firstName         String?
+  lastName          String?
+  role              UserRole           @default(INVESTOR)
+  dfnsUserId        String?            @unique
+  userAuthToken     String?
   // SHA-256 hash of the currently-valid refresh token (rotation / revocation).
-  refreshTokenHash String?
-  wallet        Wallet?
-  signSession   SignSession[]
+  refreshTokenHash  String?
+  wallet            Wallet?
+  signSession       SignSession[]
+  investmentProfile InvestmentProfile?
+  businessProfile   BusinessProfile?
+
+  // --- KYC (Sumsub) ---
+  // New users are NOT verified regardless of role. This is only set to
+  // COMPLETED once Sumsub's applicantReviewed webhook confirms reviewAnswer
+  // GREEN. Gates access to the full app until KYC is done.
+  kycStatus            KycStatus @default(NOT_STARTED)
+  sumsubApplicantId    String?   @unique
+  sumsubExternalUserId String? // mirrors our user id for Sumsub lookups
+
+  // --- KYB (Sumsub business verification) ---
+  // Only SHIPPING_COMPANY users go through KYB. Shipping companies skip KYC
+  // and go straight to KYB. KybStatus tracks the business verification
+  // lifecycle independently from KYC. Must be COMPLETED for the shipping
+  // company to tokenize RWAs.
+  kybStatus               KybStatus @default(NOT_STARTED)
+  sumsubKybApplicantId    String?   @unique
+  sumsubKybExternalUserId String? // "{userId}:kyb" for webhook routing
+
+  // Business profile data — populated from Sumsub KYB webhook when approved.
+  companyName               String?
+  companyRegistrationNumber String?
+  companyCountry            String?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -36,6 +84,8 @@ model User {
   @@index([username])
   @@index([email])
   @@index([dfnsUserId])
+  @@index([kycStatus])
+  @@index([kybStatus])
 }
 
 model Wallet {
@@ -76,4 +126,31 @@ model SignSession {
   @@index([walletId])
   @@index([userId])
   @@index([status])
+}
+
+// Investment profile answers collected before KYC verification.
+// Each user has at most one profile (1:1). Answers are stored as JSON
+// because the questionnaire structure is flexible (single + multi-select).
+model InvestmentProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  answers   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// Business profile answers collected before KYB verification (shipping
+// companies only). Same flexible JSON storage as InvestmentProfile.
+model BusinessProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  answers   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }

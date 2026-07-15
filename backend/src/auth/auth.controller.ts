@@ -18,6 +18,8 @@ import {
   LoginInitDTO,
   LoginCompleteDTO,
   RefreshDTO,
+  SubmitQuestionnaireDTO,
+  SubmitBusinessQuestionnaireDTO,
 } from './auth.dto';
 
 @ApiTags('auth')
@@ -92,5 +94,37 @@ export class AuthController {
   @ApiOperation({ summary: 'Revoke the current refresh token' })
   logout(@Req() req: AuthenticatedRequest) {
     return this.authService.logout(req.user.sub);
+  }
+
+  @Post('questionnaire')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Submit investment profile questionnaire',
+    description:
+      'Saves the investment profile answers (collected before KYC). Upserts — re-submitting replaces the previous answers.',
+  })
+  submitQuestionnaire(
+    @Req() req: AuthenticatedRequest,
+    @Body() payload: SubmitQuestionnaireDTO,
+  ) {
+    return this.authService.submitQuestionnaire(req.user.sub, payload);
+  }
+
+  @Post('business-questionnaire')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Submit business profile questionnaire',
+    description:
+      'Saves the business profile answers (collected before KYB). Upserts — re-submitting replaces the previous answers.',
+  })
+  submitBusinessQuestionnaire(
+    @Req() req: AuthenticatedRequest,
+    @Body() payload: SubmitBusinessQuestionnaireDTO,
+  ) {
+    return this.authService.submitBusinessQuestionnaire(req.user.sub, payload);
   }
 }

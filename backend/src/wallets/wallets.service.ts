@@ -31,6 +31,8 @@ import {
   DelegateWalletDTO,
   SignInitDTO,
   SignCompleteDTO,
+  TransferInitDTO,
+  TransferCompleteDTO,
 } from './wallets.dto';
 
 const horizon = new Horizon.Server(HORIZON_URL);
@@ -354,6 +356,176 @@ export class WalletsService {
       };
     } catch (error) {
       this.logger.error('Error in signComplete', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Step 1 of a Stellar payment transfer — builds a `payment` operation
+   * transaction, requests a user-action signing challenge (passkey), and
+   * stores the pending session so `transferComplete` can broadcast it.
+   */
+  async transferInit(
+    walletId: string,
+    payload: TransferInitDTO,
+  ): Promise<SuccessResponseDTO> {
+    try {
+      this.logger.debug('Transfer init', {
+        walletId,
+        username: payload.username,
+        asset: payload.asset,
+        destination: payload.destination,
+      });
+
+      const user = await this.usersRepository.getByUsername(payload.username);
+      if (!user) throw new NotFoundException('User not registered');
+      if (!user.userAuthToken) throw new Error('User not logged in');
+
+      const wallet = await this.walletsRepository.getWalletByUserId(user.id);
+      if (!wallet) throw new NotFoundException('Wallet not found');
+
+      const dfnsWallet: any = await this.dfns.api.wallets.getWallet({
+        walletId,
+      });
+      const keyId = dfnsWallet.signingKey?.id;
+      if (!keyId) throw new Error('Wallet has no signing key');
+
+      // Load the sender account (fund on testnet if needed for seq#).
+      let account;
+      try {
+        account = await horizon.loadAccount(wallet.address);
+      } catch (e: any) {
+        if (e?.response?.status === 404) {
+          await fundTestnetAccount(wallet.address);
+          account = await horizon.loadAccount(wallet.address);
+        } else {
+          throw e;
+        }
+      }
+
+      // Resolve the asset — native XLM or the trusted USDC.
+      const asset =
+        payload.asset === 'native'
+          ? Asset.native()
+          : new Asset(USDC_ASSET_CODE, USDC_ISSUER);
+
+      const tx = new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase: NETWORK_PASSPHRASE,
+      })
+        .addOperation(
+          Operation.payment({
+            destination: payload.destination,
+            asset,
+            amount: String(payload.amount),
+          }),
+        )
+        .setTimeout(180)
+        .build();
+      const transactionXdr = '0x' + tx.toEnvelope().toXDR('hex');
+
+      const delegated = this.delegatedClient(user.userAuthToken);
+      const challenge: any = await delegated.keys.generateSignatureInit({
+        keyId,
+        body: {
+          kind: 'Transaction',
+          transaction: transactionXdr,
+          network: DFNS_NETWORK,
+        } as any,
+      });
+
+      // Store the pending transfer session (reusing SignSession table).
+      await this.walletsRepository.createSignSession({
+        message: `transfer ${payload.amount} ${payload.asset} → ${payload.destination}`,
+        transactionXdr,
+        status: 'initiated',
+        wallet: { connect: { id: wallet.id } },
+        user: { connect: { id: user.id } },
+      });
+
+      return {
+        success: true,
+        message: 'Transfer challenge created',
+        data: { ...challenge, keyId, transactionXdr },
+        statusCode: HttpStatus.OK,
+      };
+    } catch (error) {
+      this.logger.error('Error in transferInit', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Step 2 of a Stellar payment transfer — completes the user-action
+   * signature, then broadcasts the signed transaction to Stellar Testnet.
+   */
+  async transferComplete(
+    walletId: string,
+    payload: TransferCompleteDTO,
+  ): Promise<SuccessResponseDTO> {
+    try {
+      this.logger.debug('Transfer complete', {
+        walletId,
+        username: payload.username,
+      });
+
+      const user = await this.usersRepository.getByUsername(payload.username);
+      if (!user) throw new NotFoundException('User not registered');
+      if (!user.userAuthToken) throw new Error('User not logged in');
+
+      const session = await this.walletsRepository.getActiveSignSession(
+        user.id,
+      );
+      if (!session) throw new Error('No transfer in progress');
+
+      const dfnsWallet: any = await this.dfns.api.wallets.getWallet({
+        walletId,
+      });
+      const keyId = dfnsWallet.signingKey?.id;
+
+      const delegated = this.delegatedClient(user.userAuthToken);
+      const signed: any = await delegated.keys.generateSignatureComplete(
+        {
+          keyId,
+          body: {
+            kind: 'Transaction',
+            transaction: session.transactionXdr,
+            network: DFNS_NETWORK,
+          } as any,
+        },
+        {
+          challengeIdentifier: payload.challengeIdentifier,
+          firstFactor: payload.firstFactor as any,
+        },
+      );
+
+      // Broadcast the signed transaction to Stellar Testnet via DFNS.
+      let broadcastResult: any = null;
+      const signedTx = signed?.signedTransaction;
+      if (signedTx) {
+        broadcastResult = await this.dfns.api.wallets.broadcastTransaction({
+          walletId,
+          body: { kind: 'Transaction', transaction: signedTx },
+        });
+      }
+
+      await this.walletsRepository.updateSignSession(session.id, {
+        status: 'completed',
+        signedXdr: signedTx ?? null,
+      });
+
+      return {
+        success: true,
+        message: 'Transfer broadcast successfully',
+        data: {
+          ...signed,
+          broadcast: broadcastResult,
+          transactionXdr: session.transactionXdr,
+        },
+        statusCode: HttpStatus.OK,
+      };
+    } catch (error) {
+      this.logger.error('Error in transferComplete', error);
       throw error;
     }
   }

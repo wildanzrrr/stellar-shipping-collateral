@@ -1,9 +1,17 @@
 export type UserRoleValue = 'INVESTOR' | 'SHIPPING_COMPANY';
 
+export type KycStatusValue =
+  'NOT_STARTED' | 'INIT' | 'PENDING' | 'COMPLETED' | 'REJECTED' | 'ON_HOLD';
+
+export type KybStatusValue =
+  'NOT_STARTED' | 'INIT' | 'PENDING' | 'COMPLETED' | 'REJECTED' | 'ON_HOLD';
+
 export interface AccessTokenPayload {
   sub: string; // user id
   email: string;
   role: UserRoleValue;
+  kycStatus: KycStatusValue; // mirrors User.kycStatus for FE gating
+  kybStatus: KybStatusValue; // mirrors User.kybStatus for FE gating
   walletId?: string; // DFNS wallet id
   walletAddress?: string; // Stellar address
 }

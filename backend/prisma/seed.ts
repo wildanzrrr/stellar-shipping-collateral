@@ -8,6 +8,7 @@ const prisma = new PrismaClient({
 async function main() {
   console.log('Seeding database...');
   // Add seed data here as needed
+  await new Promise((resolve) => setTimeout(resolve, 1000)); // Simulate async work
   console.log('Seed complete.');
 }
 

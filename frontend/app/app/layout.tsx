@@ -14,6 +14,11 @@ export const metadata: Metadata = createMetadata({
   noIndex: true,
 })
 
+/**
+ * Provides session + query context to every /app/* route — both the auth page
+ * (pre-login) and the protected dashboard (post-login).  The AppShell gate
+ * lives in `(protected)/layout.tsx` so /app/auth is never wrapped by it.
+ */
 export default function AppLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
