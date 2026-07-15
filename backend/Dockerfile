@@ -1,15 +1,15 @@
 # Stage 1: Dependencies
-FROM node:23-alpine AS deps
+FROM node:22-alpine AS deps
 WORKDIR /app
 
 # Copy only the files needed to install dependencies
-COPY package.json pnpm-lock.yaml* ./
+COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./
 
 # Install dependencies with pnpm
 RUN corepack enable pnpm && pnpm i --frozen-lockfile
 
 # Stage 2: Build
-FROM node:23-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 
 # Copy node modules from deps stage
@@ -21,11 +21,12 @@ COPY . .
 # Generate the Prisma client
 RUN corepack enable pnpm && npx prisma generate
 
-# Build the application
-RUN corepack enable pnpm && pnpm build
+# Build the application (invoke nest directly to avoid pnpm's pre-run deps
+# check, which tries to purge/reinstall node_modules and fails with no TTY)
+RUN npx nest build
 
 # Stage 3: Production runtime
-FROM node:23-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 
 # Set NODE_ENV environment variable
