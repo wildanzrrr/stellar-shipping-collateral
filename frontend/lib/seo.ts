@@ -25,9 +25,9 @@ const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"
 export const site = {
   name: "Bunkr",
   url: SITE_URL,
-  defaultTitle: "Bunkr — Freight invoice financing on Stellar",
+  defaultTitle: "Bunkr — Decentralized trade finance on Stellar",
   description:
-    "Bunkr turns verified freight invoices into identity-gated tokens on Stellar. Working capital for shipowners in days; a compliance-gated, $USDC-settled asset for KYC-verified investors.",
+    "Bunkr is a decentralized trade finance marketplace on Stellar. Shipping companies tokenize verified freight receivables for instant working capital; KYC-verified investors earn 2–9% yield from real-world shipping, settled in $USDC.",
   ogImage: {
     url: "/og.jpg",
     width: 1200,
@@ -35,6 +35,8 @@ export const site = {
     alt: "Aerial view of a loaded container ship underway — Bunkr, freight invoice financing on Stellar",
   },
   keywords: [
+    "decentralized trade finance",
+    "trade finance marketplace",
     "maritime trade finance",
     "invoice financing",
     "freight receivables",
@@ -72,7 +74,9 @@ export type SeoInput = {
 }
 
 export function createMetadata(input: SeoInput = {}): Metadata {
-  const title = input.title ? `${input.title} — ${site.name}` : site.defaultTitle
+  const title = input.title
+    ? `${input.title} — ${site.name}`
+    : site.defaultTitle
   const description = input.description ?? site.description
   const path = input.path ?? "/"
   const image = input.image ?? site.ogImage

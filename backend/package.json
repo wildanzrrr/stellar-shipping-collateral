@@ -18,11 +18,13 @@
     "prisma:generate": "npx prisma generate",
     "prisma:studio": "npx prisma studio",
     "prisma:migrate": "npx prisma migrate dev",
-    "prisma:seed": "npx prisma db seed"
+    "prisma:seed": "npx prisma db seed",
+    "prisma:export": "tsx prisma/export.ts"
   },
   "dependencies": {
     "@dfns/sdk": "^0.8.23",
     "@dfns/sdk-keysigner": "^0.8.23",
+    "@google-cloud/storage": "^7.21.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.0.1",
@@ -44,6 +46,7 @@
     "@nestjs/schematics": "^11.0.0",
     "@prisma/client": "^7.3.0",
     "@types/express": "^5.0.0",
+    "@types/multer": "^2.2.0",
     "@types/node": "^22.10.7",
     "dotenv": "^17.2.3",
     "eslint": "^9.18.0",

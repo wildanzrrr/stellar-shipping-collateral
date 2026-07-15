@@ -5,6 +5,15 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { json, raw } from 'express';
 
+// Soroban contract values (i128/u64) decode to JS `bigint`, which
+// `JSON.stringify` cannot serialize — it throws and turns any response
+// carrying on-chain data into a 500. Serialize bigints as decimal strings.
+(BigInt.prototype as unknown as { toJSON: () => string }).toJSON = function (
+  this: bigint,
+) {
+  return this.toString();
+};
+
 async function bootstrap() {
   const logger = new Logger('MAIN');
   const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -30,6 +39,10 @@ async function bootstrap() {
     'SUMSUB_KYB_LEVEL_NAME',
     // Stellar admin wallet (signs on-chain set_identity transactions)
     'ADMIN_SECRET',
+    // Google Cloud Storage (collateral document storage)
+    'GCS_PROJECT_ID',
+    'GCS_KEY_FILE',
+    'GCS_BUCKET',
   ];
 
   const missingEnvVars = requiredEnvVars.filter(

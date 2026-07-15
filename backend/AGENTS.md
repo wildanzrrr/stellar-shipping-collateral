@@ -11,7 +11,8 @@
 2. **[`docs/auth.md`](docs/auth.md)** — authentication (DFNS passkeys + JWT access/refresh + wallet provisioning + investment profile questionnaire).
 3. **[`docs/dfns.md`](docs/dfns.md)** — DFNS integration (delegated custody, signing, wallet delegation).
 4. **[`docs/sumsub.md`](docs/sumsub.md)** — Sumsub KYC/KYB integration (access tokens, webhooks, on-chain identity sync).
-5. **[`config/REQUIRED.md`](config/REQUIRED.md)** — required config files (service-account PEM, etc.).
+5. **[`docs/rwa.md`](docs/rwa.md)** — RWA tokenization & issue-collateral flow (factory `create_rwa_token`, the two-signature approve→create flow, transaction-assembly gotchas, factory-identity deploy bootstrap).
+6. **[`config/REQUIRED.md`](config/REQUIRED.md)** — required config files (service-account PEM, etc.).
 
 ---
 
@@ -40,7 +41,9 @@ backend/
 │   ├── prisma.service.ts      # PrismaClient with PrismaPg adapter
 │   ├── auth/                  # Authentication (DFNS + JWT + questionnaire)
 │   ├── dfns/                  # DFNS API client (global module)
-│   ├── blockchain/            # Soroban smart-contract bridge (identity-verifier sync)
+│   ├── blockchain/            # Soroban smart-contract bridge (identity sync + RWA tx assembly)
+│   ├── rwa/                   # RWA offerings: create_rwa_token / approve / collect / settle (see docs/rwa.md)
+│   ├── events/                # Soroban event poller → DB sync (factory events, collateral status)
 │   ├── sumsub/                # Sumsub KYC/KYB integration
 │   ├── users/                 # User repository (User + InvestmentProfile + BusinessProfile)
 │   ├── wallets/               # Wallet + SignSession CRUD

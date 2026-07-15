@@ -36,6 +36,9 @@ export function SiteNav() {
           <a className="bk-nav__link" href="#lifecycle">
             How it works
           </a>
+          <a className="bk-nav__link" href="#why">
+            Marketplace
+          </a>
           <a className="bk-nav__link" href="#recovery">
             Recovery
           </a>

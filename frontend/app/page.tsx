@@ -42,27 +42,34 @@ import {
 } from "@/components/ui/table"
 
 export const metadata: Metadata = createMetadata({
-  // homepage keeps the full brand title (no `title` override)
   description:
-    "Fuel is due today; freight pays in 30–90 days. Bunkr tokenizes verified freight invoices on Stellar — working capital for shipowners in days, 2–3% target yield per cycle for KYC-verified investors, settled in $USDC.",
+    "Bunkr is a decentralized trade finance marketplace on Stellar. Shipping companies unlock instant working capital by tokenizing verified freight receivables; KYC-verified investors earn 2–9% yield from real-world shipping, settled in $USDC.",
   path: "/",
-  keywords: ["ship financing", "bunker fuel", "freight factoring"],
+  keywords: [
+    "decentralized trade finance",
+    "trade finance marketplace",
+    "freight receivables",
+    "RWA tokenization",
+  ],
 })
 
 /*
  * Bunkr landing — studied-DNA build (see design.md + landing.css stamp).
- * Voice: shipowner hook → investor proof. Every capability claim is either
- * live on testnet (contract/ workspace) or explicitly tagged Phase 2/3.
- * Imagery: user-supplied Unsplash photography (credits in footer) + Tier-A
- * CSS art. Icons: Phosphor (the project's configured library), one weight.
+ * Voice: decentralized trade finance marketplace — shipowners unlock
+ * working capital, investors earn 2–9% yield from real shipping. Every
+ * capability claim is either live on testnet (contract/ workspace) or
+ * explicitly tagged Phase 2/3. Imagery: user-supplied Unsplash photography
+ * (credits in footer) + Tier-A CSS art. Icons: Phosphor, one weight.
  */
 
 const TICKER_ITEMS = [
+  "Decentralized trade finance",
+  "SEP-57 compliant assets",
   "Identity-gated transfers",
   "Ed25519 mint & burn permits",
-  "Nonce replay protection",
   "KYB-verified shippers",
   "KYC-verified investors",
+  "2–9% yield per cycle",
   "$USDC settlement",
   "Passkey custody via DFNS",
   "Live on Stellar Testnet",
@@ -70,13 +77,13 @@ const TICKER_ITEMS = [
 
 const WHY = [
   {
-    tag: "For shipowners",
-    cta: { label: "Start a raise →", href: "/app" },
+    tag: "For shipping companies",
+    cta: { label: "Tokenize a receivable →", href: "/app" },
     items: [
       {
         Icon: Lightning,
-        lead: "Capital in days, not 90",
-        body: "Upload the invoice, pass verification, draw the raise the moment it fills — while the freight is still en route.",
+        lead: "Instant working capital",
+        body: "Tokenize a verified freight receivable and draw capital the moment the raise fills — while the freight is still en route. No bank paperwork, no waiting 90 days.",
       },
       {
         Icon: IdentificationCard,
@@ -85,29 +92,29 @@ const WHY = [
       },
       {
         Icon: Gauge,
-        lead: "Fuel keeps moving",
-        body: "Working capital priced per offering, not per relationship. No covenants, no months of bank paperwork.",
+        lead: "Priced per offering",
+        body: "Working capital priced per receivable, not per relationship. No covenants, no months of bank approval. Interest escrowed up front.",
       },
     ],
   },
   {
     tag: "For investors",
-    cta: { label: "Fund an offering →", href: "/app" },
+    cta: { label: "Earn yield →", href: "/app" },
     items: [
       {
         Icon: TrendUp,
-        lead: "2–3% target yield per cycle",
-        body: "Interest is set per offering and escrowed up front at token creation — funded before you buy, not promised after.",
+        lead: "2–9% yield from real shipping",
+        body: "Interest is set per offering and escrowed up front at token creation — funded before you buy, not promised after. Real-world shipping transactions, not synthetic yield.",
       },
       {
         Icon: Vault,
-        lead: "Real assets, real industries",
-        body: "Every token maps 1:1 to a verified freight invoice from a working shipping lane — not synthetic yield.",
+        lead: "SEP-57 compliant assets",
+        body: "Every token is a permissioned, identity-gated asset backed 1:1 by a verified freight receivable from a working shipping lane. Transfers revert to unverified wallets.",
       },
       {
         Icon: Timer,
         lead: "Short cycles, $USDC settlement",
-        body: "Invoice terms run 30–90 days. Principal plus interest pays out at claim, in $USDC.",
+        body: "Invoice terms run 30–90 days. Principal plus interest pays out at claim, in $USDC. No lock-up beyond the invoice maturity.",
       },
     ],
   },
@@ -267,14 +274,14 @@ export default function Page() {
           <div className="bk-hero__grid">
             <div className="bk-hero__copy">
               <h1 className="bk-hero__title bk-reveal" style={styleIndex(0)}>
-                Fuel is due <span className="bk-mark">today</span>. Freight pays
-                in 90&nbsp;days.
+                Trade finance without <span className="bk-mark">the banks</span>
+                .
               </h1>
               <p className="bk-hero__sub bk-reveal" style={styleIndex(1)}>
-                Bunkr turns verified freight invoices into identity-gated tokens
-                on Stellar. Shipowners draw working capital at issuance;
-                KYC-verified investors fund the receivable and collect principal
-                plus interest at settlement.
+                Shipping companies tokenize verified freight receivables for
+                instant working capital. KYC-verified investors can earn 2–9%
+                yield from real-world shipping. All enforced by SEP-57 compliant
+                smart contracts, settled in $USDC.
               </p>
               <div className="bk-hero__actions bk-reveal" style={styleIndex(2)}>
                 <Button asChild size="lg" className="bk-btn bk-btn--fill">
@@ -290,7 +297,8 @@ export default function Page() {
                 </Button>
               </div>
               <p className="bk-hero__fine bk-reveal pt-4" style={styleIndex(3)}>
-                Stellar Testnet · passkey custody via DFNS · no seed phrase
+                SEP-57 compliant assets · passkey custody via DFNS · no seed
+                phrase
               </p>
             </div>
 
@@ -376,13 +384,18 @@ export default function Page() {
         </section>
 
         {/* ── Why try it — both sides of the market ────────────── */}
-        <section className="bk-section bk-why">
+        <section className="bk-section bk-why" id="why">
           <div className="bk-section__head">
-            <h2>Real freight. Real yield. Days, not quarters.</h2>
+            <h2>A marketplace for real-world shipping assets.</h2>
             <p className="bk-lede">
-              Bunkr isn’t synthetic yield — every token is a verified freight
-              invoice from a working shipping lane. Here’s what each side gets.
+              Bunkr connects two sides of a broken market. Shipping companies
+              unlock working capital by{" "}
+              <strong>tokenizing verified freight receivables.</strong>
+              <br />
+              Investors can earn 2–9% yield from{" "}
+              <strong>real shipping transactions.</strong> Not synthetic yield.
             </p>
+            <p className="bk-lede pt-4">Here’s what each side gets.</p>
           </div>
           <div className="bk-why__grid">
             {WHY.map((side) => (
@@ -417,7 +430,8 @@ export default function Page() {
             <h2>The lifecycle is on-chain. All five stages.</h2>
             <p className="bk-lede">
               Verification to repayment runs through the factory contract on
-              Stellar. These aren’t mock screens — every stage below is a
+              Stellar — a decentralized escrow that holds USDC end-to-end. No
+              intermediaries, no counterparty risk. Every stage below is a
               deployed contract call.
             </p>
           </div>
@@ -608,10 +622,12 @@ export default function Page() {
         <section className="bk-dark-band" id="compliance">
           <div className="bk-dark-band__inner">
             <div className="bk-section__head">
-              <h2>Compliance lives in the asset itself.</h2>
+              <h2>SEP-57 compliant. Compliance lives in the asset.</h2>
               <p className="bk-lede">
-                A Bunkr receivable is not a bearer token. Send it to an
-                anonymous wallet and the transfer reverts.
+                A Bunkr receivable is a permissioned, identity-gated token. Send
+                it to an unverified wallet and the transfer reverts. Mint and
+                burn require admin permits. The marketplace enforces its own
+                rules — no off-chain enforcement layer.
               </p>
             </div>
 
@@ -721,10 +737,11 @@ export default function Page() {
 
         {/* ── Closing CTA ──────────────────────────────────────── */}
         <section className="bk-cta">
-          <h2>Walk the lifecycle on testnet.</h2>
+          <h2>Join the marketplace on testnet.</h2>
           <p>
-            Create a passkey-custodied Stellar wallet and sign your first
-            transaction — no seed phrase, no mainnet money.
+            Tokenize a receivable or fund a verified offering — passkey custody,
+            SEP-57 compliant assets, settled in $USDC. No seed phrase, no
+            mainnet money.
           </p>
           <Button asChild size="lg" className="bk-btn bk-btn--fill">
             <Link href="/app">Open app</Link>
@@ -740,15 +757,16 @@ export default function Page() {
               <BunkrLogo />
             </p>
             <p className="bk-foot__statement">
-              Receivable financing for the maritime supply chain. Fuel today;
-              freight later.
+              A decentralized trade finance marketplace for the maritime supply
+              chain. Instant working capital for shipowners; 2–9% yield from
+              real-world shipping for investors.
             </p>
             <p className="bk-foot__meta pt-4">
               Stellar Testnet · research prototype · 2026
             </p>
           </div>
-          <nav className="bk-foot__col" aria-label="Platform">
-            <p className="bk-foot__head">Platform</p>
+          <nav className="bk-foot__col" aria-label="Marketplace">
+            <p className="bk-foot__head">Marketplace</p>
             <ul>
               <li>
                 <Link href="/app">Dashboard</Link>

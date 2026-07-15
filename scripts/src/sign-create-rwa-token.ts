@@ -12,7 +12,7 @@
  *   npm run sign:create-rwa-token
  *
  * Output (JSON): {
- *   factory, shipper, raise_amount, interest_bps, due_ledger, name, symbol,
+ *   factory, shipper, token_id, raise_amount, interest_bps, due_ledger, name, symbol,
  *   salt, token, nonce, deadline, mint_signature
  * }
  */
@@ -43,6 +43,18 @@ const factory = await ask({
     isValidCAddress(v.trim()) ? true : "Not a valid C... contract address",
 });
 
+// Generate a token_id matching the backend's convention: tkn-<cuid2>.
+// User can override with a custom id if needed.
+const defaultTokenId = `tkn-${randomBytes(12).toString("hex")}`;
+const tokenId = await ask({
+  type: "text",
+  name: "TOKEN_ID",
+  message: "Token ID (blank for auto-generated)",
+  initial: defaultTokenId,
+  validate: (v: string) =>
+    v.trim().length > 0 ? true : "Token ID is required",
+});
+
 const shipper = await ask({
   type: "text",
   name: "SHIPPER_ADDRESS",
@@ -54,18 +66,18 @@ const shipper = await ask({
 const raiseAmountStr = await ask({
   type: "text",
   name: "RAISE_AMOUNT",
-  message: "Raise amount (whole USDC, e.g. 10000 = 10K USDC @ 7 decimals)",
+  message: "Raise amount in USDC (e.g. 10000 = 10K USDC, supports decimals)",
   validate: (v: string) => {
-    try {
-      const n = BigInt(v.trim());
-      return n > 0n ? true : "Must be > 0";
-    } catch {
-      return "Must be an integer";
-    }
+    const n = Number(v.trim());
+    if (isNaN(n) || n <= 0) return "Must be > 0";
+    const parts = v.trim().split(/[.,]/);
+    if (parts.length > 2 || (parts[1]?.length ?? 0) > 7)
+      return "Maximum 7 decimal places (USDC precision)";
+    return true;
   },
 });
 const USDC_SCALE = 10_000_000n; // 10^7 — matches MockToken
-const raiseAmount = BigInt(raiseAmountStr) * USDC_SCALE;
+const raiseAmount = BigInt(Math.round(Number(raiseAmountStr) * 10_000_000));
 
 const interestBpsStr = await ask({
   type: "text",
@@ -192,6 +204,7 @@ const out = {
   networkPassphrase: getNetworkPassphrase(),
   factory,
   shipper,
+  token_id: tokenId,
   raise_amount: raiseAmount.toString(),
   interest_bps: interestBps.toString(),
   due_ledger: dueLedger,

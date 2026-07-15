@@ -4,6 +4,7 @@ JSON="$1"
 NET="testnet"
 FACTORY=$(jq -r .factory $JSON)
 SHIPPER=$(jq -r .shipper $JSON)
+TOKEN_ID=$(jq -r .token_id $JSON)
 RAISE=$(jq -r .raise_amount $JSON)
 INT=$(jq -r .interest_bps $JSON)
 DUE=$(jq -r .due_ledger $JSON)
@@ -19,8 +20,7 @@ stellar contract invoke \
   --id "$FACTORY" \
   --source "$SRC" \
   -- create_rwa_token \
-  --shipper "$SHIPPER" \
-  --raise_amount "$RAISE" \
+  --shipper "$SHIPPER" \  --token_id "$TOKEN_ID" \  --raise_amount "$RAISE" \
   --interest_bps "$INT" \
   --due_ledger "$DUE" \
   --name "$NAME" \

@@ -39,6 +39,25 @@ function bearer(accessToken: string): HeadersInit {
   return { Authorization: `Bearer ${accessToken}` }
 }
 
+function bearerJson(accessToken: string): HeadersInit {
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+  }
+}
+
+/** SHA-256 of a File/Blob as a 64-char lowercase hex string. */
+async function sha256Hex(blob: Blob): Promise<string> {
+  const buf = await blob.arrayBuffer()
+  const digest = await crypto.subtle.digest("SHA-256", buf)
+  const bytes = new Uint8Array(digest)
+  let out = ""
+  for (let i = 0; i < bytes.length; i++) {
+    out += bytes[i].toString(16).padStart(2, "0")
+  }
+  return out
+}
+
 // ---- shared types ----
 
 export type UserRole = "INVESTOR" | "SHIPPING_COMPANY"
@@ -292,4 +311,360 @@ export const sumsubApi = {
       method: "POST",
       headers: bearer(accessToken),
     }),
+}
+
+// ---- RWA / factory contract (protected) ----
+
+export type RwaStatus = "Open" | "Funded" | "Settled" | "Unknown"
+
+export interface RwaSummary {
+  id: string
+  shipper: string
+  token: string | null
+  status: RwaStatus
+  raiseAmount: string
+  interestBps: number
+  sharesBought: string
+  sharesTotal: string
+  dueLedger: number
+  collateral: CollateralRecord | null
+  /** Local collateral createdAt (ISO) — lists are sorted newest-first by this. */
+  createdAt?: string | null
+  /** Investor's own holding (token base units) — only set for the `mine` list. */
+  myShares?: string
+}
+
+export interface RwaDetail extends RwaSummary {
+  /** Approximate calendar date (ISO) the due ledger closes at — for "due in N days". */
+  dueDate?: string | null
+  interestPool: string
+  principalPool: string
+  protocolFeeBps: number
+  protocolFeePool: string
+  sharesReserved: string
+  investors: number
+  /** Per-investor holdings keyed by wallet address (token base units). */
+  investorHoldings: Record<string, string>
+  events: TransactionEvent[]
+}
+
+export interface TransactionEvent {
+  id: string
+  rwaId: string
+  eventType: string
+  investorAddress: string | null
+  amount: string | null
+  txHash: string | null
+  ledger: number
+  createdAt: string
+}
+
+export interface PreparedTx {
+  txXdr: string
+  tokenId?: string
+  predictedTokenAddress?: string
+  raiseAmount?: string
+  interestBps?: string
+  dueLedger?: number
+  deadline?: number
+  nonce?: string
+  salt?: string
+  rwaId?: string
+  shipper?: string
+  principalAmount?: string
+}
+
+export interface SubmitTxResult {
+  hash: string
+  status: string
+  errorResult: string | null
+}
+
+export const rwaApi = {
+  list: (
+    accessToken: string,
+    page = 1,
+    limit = 20,
+    opts?: { mine?: boolean }
+  ) =>
+    req<{ items: RwaSummary[]; total: number; page: number; limit: number }>(
+      `/rwa?page=${page}&limit=${limit}${opts?.mine ? "&mine=true" : ""}`,
+      { headers: bearer(accessToken) }
+    ),
+  getRwa: (accessToken: string, rwaId: string) =>
+    req<RwaDetail>(`/rwa/${encodeURIComponent(rwaId)}`, {
+      headers: bearer(accessToken),
+    }),
+  getInvestors: (accessToken: string, rwaId: string) =>
+    req<{ rwaId: string; investors: TransactionEvent[] }>(
+      `/rwa/${encodeURIComponent(rwaId)}/investors`,
+      { headers: bearer(accessToken) }
+    ),
+  listEvents: (accessToken: string) =>
+    req<{ items: TransactionEvent[] }>(`/rwa/events`, {
+      headers: bearer(accessToken),
+    }),
+  prepareApproveFactory: (accessToken: string, body: CreateRwaTokenPayload) =>
+    req<PreparedTx>("/rwa/approve-factory", {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify(body),
+    }),
+  prepareCreateRwaToken: (accessToken: string, body: CreateRwaTokenPayload) =>
+    req<PreparedTx>("/rwa/create-token", {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify(body),
+    }),
+  prepareCollectFund: (accessToken: string, rwaId: string) =>
+    req<PreparedTx>(`/rwa/${encodeURIComponent(rwaId)}/collect-fund`, {
+      method: "POST",
+      headers: bearer(accessToken),
+    }),
+  prepareSettleDebt: (
+    accessToken: string,
+    rwaId: string,
+    principalAmount: string
+  ) =>
+    req<PreparedTx>(`/rwa/${encodeURIComponent(rwaId)}/settle-debt`, {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify({ principalAmount }),
+    }),
+  /** Generic USDC approve (caller → factory). Precedes buy_shares / settle_debt. */
+  prepareApprove: (accessToken: string, amount: string) =>
+    req<PreparedTx>("/rwa/approve", {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify({ amount }),
+    }),
+  prepareBuyShares: (accessToken: string, rwaId: string, amount: string) =>
+    req<PreparedTx>(`/rwa/${encodeURIComponent(rwaId)}/buy-shares`, {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify({ amount }),
+    }),
+  prepareClaim: (accessToken: string, rwaId: string, amount: string) =>
+    req<PreparedTx>(`/rwa/${encodeURIComponent(rwaId)}/claim`, {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify({ amount }),
+    }),
+  submitTransaction: (accessToken: string, signedTxXdr: string) =>
+    req<SubmitTxResult>("/rwa/submit", {
+      method: "POST",
+      headers: bearer(accessToken),
+      body: JSON.stringify({ signedTxXdr }),
+    }),
+}
+
+// ---- collateral (protected) ----
+
+export type CollateralStatus = "DRAFT" | "SUBMITTED" | "VERIFIED" | "ON_CHAIN"
+export type DocumentTypeKey =
+  | "COMMERCIAL_INVOICE"
+  | "BILL_OF_LADING"
+  | "PROOF_OF_DELIVERY"
+  | "SHIPPING_CONTRACT"
+  | "NOTICE_OF_ASSIGNMENT"
+
+export interface CollateralRecord {
+  id: string
+  rwaId: string
+  tokenAddress: string | null
+  status: CollateralStatus
+  collateralData: Record<string, unknown> | null
+  documents?: CollateralDocument[]
+  user?: { id: string; email: string; companyName?: string | null }
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CollateralDocument {
+  id: string
+  documentType: DocumentTypeKey
+  fileName: string
+  mimeType: string
+  fileHash: string
+  gcsUri: string
+  createdAt: string
+}
+
+/**
+ * Extract token name + symbol from a collateral record's `collateralData`.
+ * Returns `null` if either field is missing or not a string.
+ */
+export function getTokenNameSymbol(
+  collateral:
+    { collateralData: Record<string, unknown> | null } | null | undefined
+): { name: string; symbol: string } | null {
+  const data = collateral?.collateralData
+  if (!data) return null
+  const name = data["name"]
+  const symbol = data["symbol"]
+  if (typeof name !== "string" || typeof symbol !== "string") return null
+  if (!name || !symbol) return null
+  return { name, symbol }
+}
+
+export interface CreateRwaTokenPayload {
+  raiseAmount: string
+  interestBps: string
+  dueDays: number
+  name: string
+  symbol: string
+  /**
+   * Reuse a specific on-chain token id. When creating the collateral record
+   * first, pass its `rwaId` here so the on-chain token shares the same id.
+   * (Ignored by `prepareApproveFactory`.)
+   */
+  tokenId?: string
+}
+
+export const collateralApi = {
+  create: (
+    accessToken: string,
+    body: {
+      // Omit to have the backend generate the rwaId (returned in the response).
+      rwaId?: string
+      tokenAddress?: string
+      collateralData?: Record<string, unknown>
+    }
+  ) =>
+    req<{ id: string; rwaId: string; status: CollateralStatus }>(
+      "/collateral",
+      {
+        method: "POST",
+        headers: bearer(accessToken),
+        body: JSON.stringify(body),
+      }
+    ),
+  list: (accessToken: string, page = 1, limit = 10) =>
+    req<{
+      items: CollateralRecord[]
+      total: number
+      page: number
+      limit: number
+    }>(`/collateral?page=${page}&limit=${limit}`, {
+      headers: bearer(accessToken),
+    }),
+  getById: (accessToken: string, id: string) =>
+    req<CollateralRecord>(`/collateral/${encodeURIComponent(id)}`, {
+      headers: bearer(accessToken),
+    }),
+  update: (
+    accessToken: string,
+    id: string,
+    body: {
+      tokenAddress?: string
+      status?: CollateralStatus
+      collateralData?: Record<string, unknown>
+    }
+  ) =>
+    req<{ id: string; rwaId: string; status: CollateralStatus }>(
+      `/collateral/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        headers: bearer(accessToken),
+        body: JSON.stringify(body),
+      }
+    ),
+  /**
+   * Two-step upload (presigned GCS URL):
+   *   1. Request an upload URL — backend pre-creates the document row.
+   *   2. PUT the file bytes directly to GCS using the returned URL.
+   *
+   * SHA-256 of the file is computed in the browser and sent to the
+   * backend for tamper detection on download.
+   */
+  uploadDocument: async (
+    accessToken: string,
+    collateralId: string,
+    file: File,
+    documentType: DocumentTypeKey,
+    onProgress?: (percent: number) => void
+  ): Promise<{
+    id: string
+    documentType: DocumentTypeKey
+    fileName: string
+    fileHash: string
+    gcsUri: string
+  }> => {
+    // 1. Hash the file in the browser.
+    const fileHash = await sha256Hex(file)
+
+    // 2. Request a presigned PUT URL.
+    const urlRes = await fetch(
+      `${base}/collateral/${encodeURIComponent(collateralId)}/documents/upload-url`,
+      {
+        method: "POST",
+        headers: bearerJson(accessToken),
+        body: JSON.stringify({
+          documentType,
+          fileName: file.name,
+          fileSize: file.size,
+          contentType: file.type || "application/octet-stream",
+          fileHash,
+        }),
+      }
+    )
+    if (!urlRes.ok) {
+      throw new Error(
+        `Failed to get upload URL: ${urlRes.status} ${await urlRes.text()}`
+      )
+    }
+    const urlJson = (await urlRes.json()) as Wrapped<{
+      id: string
+      documentType: DocumentTypeKey
+      fileName: string
+      fileHash: string
+      gcsUri: string
+      uploadUrl: string
+    }>
+    const { uploadUrl, ...rest } = urlJson.data
+
+    // 3. PUT the file bytes directly to GCS. The signed URL was bound to
+    //    this Content-Type, so we MUST send the matching header. XHR is used
+    //    (rather than fetch) so we get real upload-progress events for the
+    //    per-document progress bar.
+    onProgress?.(0)
+    await new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open("PUT", uploadUrl)
+      xhr.setRequestHeader(
+        "Content-Type",
+        file.type || "application/octet-stream"
+      )
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          onProgress?.(Math.round((e.loaded / e.total) * 100))
+        }
+      }
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          onProgress?.(100)
+          resolve()
+        } else {
+          reject(
+            new Error(`GCS upload failed: ${xhr.status} ${xhr.responseText}`)
+          )
+        }
+      }
+      xhr.onerror = () =>
+        reject(new Error("GCS upload failed: network error"))
+      xhr.send(file)
+    })
+
+    return rest
+  },
+  getDocumentUrl: (accessToken: string, collateralId: string, docId: string) =>
+    req<{
+      id: string
+      fileName: string
+      signedUrl: string
+      expiresInSeconds: number
+    }>(
+      `/collateral/${encodeURIComponent(collateralId)}/documents/${encodeURIComponent(docId)}`,
+      { headers: bearer(accessToken) }
+    ),
 }
