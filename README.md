@@ -3,24 +3,24 @@
 > **Trade finance without the banks.**
 > A decentralized trade finance marketplace on Stellar.
 
-Bunkr connects two sides of a broken market. Shipping companies unlock instant
-working capital by **tokenizing verified freight receivables** — drawing capital
-the moment a raise fills, while the freight is still en route. KYC-verified
-investors can earn **2–9% yield from real-world shipping**, not synthetic yield,
-settled in **$USDC**.
+Shipping companies tokenize verified freight receivables for instant working capital. KYC-verified investors can earn 2–9% yield from real-world shipping. All enforced by **SEP-57** compliant smart contracts, settled in **$USDC**.
 
 Every token is a permissioned, identity-gated **SEP-57 compliant** asset backed
-1:1 by a verified freight receivable. Transfers to unverified wallets revert;
-mint and burn require signed admin permits; a compliance contract enforces
-per-token balance caps on every hop. Custody is handled by passkeys via DFNS —
+1:1 by a verified freight receivable. Transfers to unverified wallets revert.
+Mint and burn require signed admin permits. A compliance contract enforces
+per-token balance caps on every hop. Custody is handled by passkeys via DFNS,
 no seed phrase, no browser extension.
 
 The full business lifecycle — verification, tokenization, funding, settlement,
-and claims — runs on-chain today, live on **Stellar Testnet**.
+and claims — runs on-chain, live on **Stellar Testnet**.
 
 ---
 
 ## Deployments
+
+### Website
+
+**App:** https://bunkr-stellar.vercel.app
 
 ### Smart contracts (Stellar Testnet)
 
@@ -33,10 +33,6 @@ and claims — runs on-chain today, live on **Stellar Testnet**.
 > The **sep57** token contract is uploaded as WASM and is not deployed as a
 > single instance — the factory mints a fresh permissioned token per offering on
 > demand.
-
-### Website
-
-**Live app:** https://bunkr-stellar.vercel.app/
 
 ---
 
