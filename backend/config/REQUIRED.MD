@@ -2,3 +2,4 @@
 
 - service-account.pem
 - service-account.public.pem
+- gcs-key.json
