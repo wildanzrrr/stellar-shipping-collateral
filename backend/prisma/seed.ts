@@ -1,102 +1,89 @@
 /**
- * Seed the database by loading prisma/dump.sql (produced by prisma/export.ts).
+ * Seed the database by loading prisma/seed-data.json (produced by
+ * prisma/export.ts).
  *
- * The dump contains the full schema + data with DROP ... IF EXISTS, so it is
- * idempotent. `psql` runs INSIDE the `postgres` compose service (via `docker
- * compose exec`) so the client version matches the server and no host-side
- * Postgres tools are required — see prisma/export.ts for the rationale.
+ * Uses the SAME Prisma client + pg adapter the NestJS app uses
+ * (src/prisma.service.ts), so it talks to the DB over DATABASE_URL directly —
+ * no `psql`, no Docker exec, and no host Postgres client tools.
+ *
+ * The whole load runs in one transaction: every table is cleared in
+ * reverse-FK order, then rows are re-inserted in FK order. This reproduces a
+ * known-good database and is idempotent — re-running yields the same result.
  *
  * Usage:  pnpm prisma:seed   (or)   npx prisma db seed
  *
- * Requires: Docker running with the `postgres` service up (docker compose up).
- * Override the compose service name with PG_SERVICE if it was renamed.
+ * Requires: DATABASE_URL reachable (the Postgres server must be running) and
+ * the schema already migrated (`pnpm prisma:migrate`).
  */
 import 'dotenv/config';
-import { execFileSync } from 'child_process';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from './generated/prisma/client';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 
-// `tsx prisma/seed.ts` runs with cwd = backend root, so the prisma/ dir and
-// docker-compose.yml are always at <cwd>.
-const PRISMA_DIR = join(process.cwd(), 'prisma');
-const PG_SERVICE = process.env.PG_SERVICE || 'postgres';
+// Models in FK-dependency order: parents before children. Insert in this
+// order; clear (deleteMany) in reverse so foreign keys never block a delete.
+const MODELS = [
+  'user',
+  'wallet',
+  'signSession',
+  'investmentProfile',
+  'businessProfile',
+  'collateral',
+  'collateralDocument',
+  'transactionEvent',
+  'eventListenerCursor',
+] as const;
 
-// Parse DATABASE_URL for the credentials psql needs (host/port unused — psql
-// runs inside the container against its local socket).
-function parseDatabaseUrl(url: string) {
-  const u = new URL(url);
-  return {
-    user: decodeURIComponent(u.username),
-    password: decodeURIComponent(u.password),
-    database: u.pathname.replace(/^\//, ''),
-  };
-}
+async function main() {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    console.error('DATABASE_URL is not set');
+    process.exit(1);
+  }
 
-/**
- * pg_dump 17+ emits `SET transaction_timeout = 0;`, a GUC that PostgreSQL 16
- * (our container) doesn't recognize and would reject under ON_ERROR_STOP=1.
- * Strip such newer-only SET lines so restores into an older server succeed.
- * Dumps produced by prisma/export.ts run inside the PG16 container and won't
- * contain them, but this keeps seeding resilient to dumps made by a newer
- * host pg_dump.
- */
-function sanitize(sql: string): string {
-  return sql.replace(/^SET transaction_timeout = .*$\r?\n?/gm, '');
-}
+  console.log('Seeding database...');
 
-function loadDump(databaseUrl: string): void {
-  const dumpPath = join(PRISMA_DIR, 'dump.sql');
-  if (!existsSync(dumpPath)) {
-    console.log('No dump.sql found — skipping SQL import.');
+  const dataPath = join(process.cwd(), 'prisma', 'seed-data.json');
+  if (!existsSync(dataPath)) {
+    console.log('No seed-data.json found — nothing to seed.');
     return;
   }
 
-  const cfg = parseDatabaseUrl(databaseUrl);
-  const sql = sanitize(readFileSync(dumpPath, 'utf-8'));
-
-  console.log(
-    `Loading dump.sql into "${cfg.database}" via container service "${PG_SERVICE}" (${Math.round(sql.length / 1024)} KB)...`,
+  const data: Record<string, any[]> = JSON.parse(
+    readFileSync(dataPath, 'utf-8'),
   );
 
-  // psql reads SQL from stdin. ON_ERROR_STOP makes it fail fast on any error.
-  execFileSync(
-    'docker',
-    [
-      'compose',
-      'exec',
-      '-T',
-      '-e',
-      `PGPASSWORD=${cfg.password}`,
-      PG_SERVICE,
-      'psql',
-      '--username',
-      cfg.user,
-      '--dbname',
-      cfg.database,
-      '--quiet',
-      '--set',
-      'ON_ERROR_STOP=1',
-    ],
-    { input: sql, encoding: 'utf-8', maxBuffer: 1024 * 1024 * 256 },
-  );
+  const adapter = new PrismaPg({ connectionString: databaseUrl });
+  const prisma = new PrismaClient({ adapter });
 
-  console.log('SQL dump loaded.');
+  try {
+    await prisma.$transaction(
+      async (tx) => {
+        // Clear existing rows child-first so FK constraints never block a delete.
+        for (const model of [...MODELS].reverse()) {
+          await (tx as any)[model].deleteMany();
+        }
+        // Re-insert parent-first. Prisma coerces the ISO date strings and keeps
+        // Json columns as-is, so the exported rows go back in verbatim.
+        for (const model of MODELS) {
+          const rows = data[model] ?? [];
+          if (rows.length) {
+            await (tx as any)[model].createMany({ data: rows });
+            console.log(`  ${model}: ${rows.length} rows`);
+          }
+        }
+      },
+      { timeout: 120_000 },
+    );
+
+    console.log('Seed complete.');
+  } finally {
+    await prisma.$disconnect();
+  }
 }
 
-function main() {
-  console.log('Seeding database...');
-
-  // The dump contains the full schema *and* data (with DROP IF EXISTS), so it
-  // reproduces a known-good database. The _prisma_migrations table is included
-  // so Prisma stays in sync.
-  loadDump(process.env.DATABASE_URL!);
-
-  console.log('Seed complete.');
-}
-
-try {
-  main();
-} catch (e) {
+main().catch((e) => {
   console.error(e);
   process.exit(1);
-}
+});

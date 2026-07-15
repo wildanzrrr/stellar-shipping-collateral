@@ -20,7 +20,7 @@ and claims — runs on-chain, live on **Stellar Testnet**.
 
 ### Website
 
-**App:** https://bunkr-stellar.vercel.app
+**App:** https://bunkr.streamfund.live
 
 ### Smart contracts (Stellar Testnet)
 
